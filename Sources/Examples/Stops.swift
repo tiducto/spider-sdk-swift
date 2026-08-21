@@ -28,3 +28,42 @@ func reuseHit(client: SpiderClient) async throws {
     // [END reuseHit]
     _ = departures
 }
+
+/// Find the stops nearest to a coordinate, closest first, within a radius.
+func stopsNearby(client: SpiderClient) async throws {
+    // [START stopsNearby]
+    let result = try await client.stops.near(49.1951, 16.6068, radiusMeters: 500)
+    if case .success(let stops) = result {
+        for stop in stops {
+            print("\(stop.name) at \(stop.lat ?? 0),\(stop.lon ?? 0)")
+        }
+    }
+    // [END stopsNearby]
+}
+
+/// Look up a single stop by its GTFS id: found, not-found (nil), or a transport error.
+func stopById(client: SpiderClient) async throws {
+    // [START stopById]
+    do {
+        if let stop = try await client.stops.byId("U123Z1") {
+            print("found \(stop.name) in \(stop.city ?? "?")")
+        } else {
+            print("no stop with that id")
+        }
+    } catch let error as SpiderError {
+        print("lookup failed: \(error.message)")
+    }
+    // [END stopById]
+}
+
+/// Search stops constrained to a city (an administrative-area filter).
+func stopsByCity(client: SpiderClient) async throws {
+    // [START stopsByCity]
+    let result = try await client.stops.search(StopFilter(name: "náměstí", city: "Brno"))
+    if case .success(let stops) = result {
+        for stop in stops {
+            print("\(stop.name) — \(stop.city ?? "?")")
+        }
+    }
+    // [END stopsByCity]
+}
