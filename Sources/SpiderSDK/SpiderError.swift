@@ -98,6 +98,7 @@ func parseErrorEnvelope(_ text: String) -> ErrorEnvelope {
 
 /// Maps any thrown error into the public `SpiderError` taxonomy. Mirrors the TS SDK's `toSpiderError`.
 func toSpiderError(_ error: Error) -> SpiderError {
+    if let spider = error as? SpiderError { return spider } // idempotent: an already-mapped error passes through
     if let te = error as? TransportError {
         switch te.kind {
         case .http:

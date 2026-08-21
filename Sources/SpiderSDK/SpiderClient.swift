@@ -21,6 +21,7 @@ public struct SpiderClientOptions {
     public var timeout: TimeInterval?
     public var routing: FeatureOptions?
     public var stops: FeatureOptions?
+    public var routes: FeatureOptions?
     public var realtime: FeatureOptions?
 
     public init(
@@ -28,12 +29,14 @@ public struct SpiderClientOptions {
         timeout: TimeInterval? = nil,
         routing: FeatureOptions? = nil,
         stops: FeatureOptions? = nil,
+        routes: FeatureOptions? = nil,
         realtime: FeatureOptions? = nil
     ) {
         self.httpClient = httpClient
         self.timeout = timeout
         self.routing = routing
         self.stops = stops
+        self.routes = routes
         self.realtime = realtime
     }
 }
@@ -44,6 +47,7 @@ public struct SpiderClientOptions {
 public final class SpiderClient {
     public let routing: SpiderRouting
     public let stops: SpiderStops
+    public let routes: SpiderRoutes
     public let realtime: SpiderRealtime
 
     public init(baseURL: String, apiKey: String, options: SpiderClientOptions = SpiderClientOptions()) {
@@ -61,6 +65,7 @@ public final class SpiderClient {
 
         self.routing = SpiderRouting(transport: transport(options.routing))
         self.stops = SpiderStops(transport: transport(options.stops))
+        self.routes = SpiderRoutes(transport: transport(options.routes))
         self.realtime = SpiderRealtime(transport: transport(options.realtime))
     }
 
