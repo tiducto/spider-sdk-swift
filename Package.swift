@@ -18,5 +18,8 @@ let package = Package(
         .target(name: "SpiderContract"),
         .target(name: "SpiderSDK", dependencies: ["SpiderContract"]),
         .testTarget(name: "SpiderSDKTests", dependencies: ["SpiderSDK"]),
+        // Region-tagged example programs the docs site inlines as code samples. Not a package product
+        // (internal, like the tests); it exists only to keep the samples compiling against the real API.
+        .executableTarget(name: "spider-sdk-examples", dependencies: ["SpiderSDK"], path: "Sources/Examples"),
     ]
 )
