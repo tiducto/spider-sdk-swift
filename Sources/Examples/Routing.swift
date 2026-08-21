@@ -65,6 +65,36 @@ func departures(client: SpiderClient) async throws {
     // [END departures]
 }
 
+/// Page forward: fetch the next page of itineraries after the first result.
+func laterItineraries(client: SpiderClient) async throws {
+    // [START laterItineraries]
+    let result = try await client.routing.plan(PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        first: 3
+    ))
+
+    switch result {
+    case .success(let firstPage):
+        // planNext returns nil when there is no further page.
+        guard let next = try await client.routing.planNext(firstPage) else {
+            print("No later itineraries — that was the last page")
+            return
+        }
+        switch next {
+        case .success(let laterPage):
+            for edge in laterPage.edges {
+                print("\(edge.itinerary.start ?? "?") → \(edge.itinerary.end ?? "?")")
+            }
+        case .failure(let error):
+            print("next page failed: \(error.message)")
+        }
+    case .failure(let error):
+        print("plan failed: \(error.message)")
+    }
+    // [END laterItineraries]
+}
+
 /// Look up a single trip's timetable.
 func tripLookup(client: SpiderClient) async throws {
     // [START tripLookup]
