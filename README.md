@@ -18,7 +18,7 @@ Swift Package Manager. In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tiducto/spider-sdk-swift.git", from: "5.0.0"),
+    .package(url: "https://github.com/tiducto/spider-sdk-swift.git", from: "5.1.1"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: [.product(name: "SpiderSDK", package: "spider-sdk-swift")]),
@@ -127,5 +127,5 @@ Retries (opt-in per surface) back off on `429`/`5xx` and network/timeout errors,
 
 The wire models under `Sources/SpiderContract/` and the persisted-query ids are **generated** from the
 published contract by `scripts/generate-contract.sh` (via `tiducto/spider-codegen`) and committed — the package
-carries the types, not the spec. `client.contractVersion` reports the contract version this SDK speaks (`5.0`).
+carries the types, not the spec. `client.contractVersion` reports the contract version this SDK speaks (`5.1`).
 Do not hand-edit generated files; re-run the script.

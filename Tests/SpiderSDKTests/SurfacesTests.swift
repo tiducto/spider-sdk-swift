@@ -109,6 +109,6 @@ final class EnumsAndPolylineTests: XCTestCase {
 
     func testClientExposesContractVersion() {
         let (client, _) = makeClient { _ in json("{}") }
-        XCTAssertEqual(client.contractVersion, "5.0")
+        XCTAssertEqual(client.contractVersion, "5.1")
     }
 }

@@ -48,8 +48,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.path, "/routing/plan")
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "5.0")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/5.0.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "5.1")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/5.1.1")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
         XCTAssertEqual(req.bodyJSON["id"] as? String, "4ce89d3209a478dd7a75d2abffd9956e79e081bfbaeeeae33fb255309c59aa80")
         let vars = req.bodyJSON["variables"] as! [String: Any]
@@ -153,7 +153,7 @@ final class RoutingTests: XCTestCase {
             _ = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
             XCTFail("expected throw")
         } catch let error as SpiderContractMismatchError {
-            XCTAssertEqual(error.expected, "5.0")
+            XCTAssertEqual(error.expected, "5.1")
             XCTAssertEqual(error.actual, "4.0")
         }
     }
