@@ -1,0 +1,31 @@
+name: Build SDK
+
+# Builds the SwiftPM package AND the spider-sdk-examples executable target (swift build compiles
+# it, so a stale/wrong example fails the build), then runs the tests. macOS runner for the Apple
+# toolchain. PR merge gate + first stage of the release pipeline (workflow_call). Draft PRs skip it;
+# ready_for_review re-triggers.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Swift version
+        run: swift --version
+      - name: Build (library + examples target)
+        run: swift build
+      - name: Test
+        run: swift test

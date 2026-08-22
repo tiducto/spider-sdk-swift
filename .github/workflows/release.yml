@@ -1,0 +1,26 @@
+name: Release
+
+# Swift has no package registry — the git tag IS the release (SwiftPM consumers resolve from tags).
+# So this pipeline gates the Context7 refresh on a green build of the tagged commit: build (reuses
+# build.yml — compiles library + examples, runs tests) -> refresh-context. Push a semver tag X.Y.Z.
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  refresh-context:
+    needs: build
+    uses: ./.github/workflows/context7-refresh.yml
+    secrets: inherit
