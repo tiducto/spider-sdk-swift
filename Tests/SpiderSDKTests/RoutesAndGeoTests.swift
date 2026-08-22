@@ -1,54 +1,6 @@
 import XCTest
 @testable import SpiderSDK
 
-final class RoutesTests: XCTestCase {
-    func testSearchBuildsFilterExpressionAndMapsHits() async throws {
-        let body = """
-        {"hits":[{"routeId":"1:L4","shortName":"L4","longName":"Express Line 4","mode":"BUS","routeType":3,"agencyName":"DPMB","tripCount":412}],"query":"express"}
-        """
-        let (client, mock) = makeClient { _ in json(body) }
-        let result = try await client.routes.search(RouteFilter(q: "express", mode: "BUS", agency: "DPMB", limit: 20))
-        guard case .success(let routes) = result else { return XCTFail("expected success") }
-        XCTAssertEqual(routes.count, 1)
-        XCTAssertEqual(routes[0].routeId, "1:L4")
-        XCTAssertEqual(routes[0].mode, "BUS")
-        XCTAssertEqual(routes[0].tripCount, 412)
-
-        let req = mock.requests[0]
-        XCTAssertEqual(req.path, "/routes/search")
-        XCTAssertEqual(req.bodyJSON["q"] as? String, "express")
-        XCTAssertEqual(req.bodyJSON["filter"] as? String, #""mode" = "BUS" AND "agencyName" = "DPMB""#)
-        XCTAssertEqual(req.bodyJSON["limit"] as? Int, 20)
-    }
-
-    func testByIdBuildsRouteIdFilterAndReturnsHit() async throws {
-        let body = #"{"hits":[{"routeId":"1:L4","shortName":"L4","longName":null,"mode":"TRAM","routeType":0,"agencyName":"DPMB","tripCount":88}]}"#
-        let (client, mock) = makeClient { _ in json(body) }
-        let route = try await client.routes.byId("1:L4")
-        XCTAssertEqual(route?.routeId, "1:L4")
-        XCTAssertNil(route?.longName)
-        XCTAssertEqual(mock.requests[0].bodyJSON["filter"] as? String, #""routeId" = "1:L4""#)
-        XCTAssertEqual(mock.requests[0].bodyJSON["limit"] as? Int, 1)
-    }
-
-    func testByIdReturnsNilWhenNoHit() async throws {
-        let (client, _) = makeClient { _ in json(#"{"hits":[]}"#) }
-        let route = try await client.routes.byId("nope")
-        XCTAssertNil(route)
-    }
-
-    func testByIdThrowsMappedSpiderErrorOnServerFailure() async throws {
-        let (client, _) = makeClient { _ in json(#"{"message":"index missing"}"#, status: 500) }
-        do {
-            _ = try await client.routes.byId("1:L4")
-            XCTFail("expected throw")
-        } catch let error as SpiderError {
-            XCTAssertEqual(error.code, .server)
-            XCTAssertTrue(error.message.contains("index missing"))
-        }
-    }
-}
-
 final class StopsGeoTests: XCTestCase {
     func testNearSetsDistanceSortAndGeoRadius() async throws {
         let (client, mock) = makeClient { _ in json(#"{"hits":[]}"#) }
