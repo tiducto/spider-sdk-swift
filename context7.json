@@ -1,0 +1,26 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Spider SDK for Swift",
+  "description": "A Swift client for the Spider transit API — plan trips, list a stop's next departures, and look up a single trip from your app.",
+  "branch": "main",
+  "folders": [
+    "README.md",
+    "Sources/SpiderSDK",
+    "Sources/Examples"
+  ],
+  "excludeFolders": [
+    ".build",
+    "Sources/SpiderContract",
+    ".github",
+    "Tests"
+  ],
+  "excludeFiles": [
+    "CHANGELOG.md"
+  ],
+  "rules": [
+    "Construct one SpiderClient with your environment base URL and API key — SpiderClient(baseURL: \"https://your-env-slug.api.tiducto.eu\", apiKey: \"...\") — then reach a surface via client.routing, client.stops, or client.realtime.",
+    "Plan a trip with client.routing.plan(PlanOptions(origin:destination:first:)); build locations with .coordinate(lat, lon), and page results with client.routing.planNext(page) / planPrevious(page).",
+    "List a stop's upcoming departures with client.routing.departures(stopId, numberOfDepartures:), and fetch a single trip's timetable with client.routing.trip(tripId).",
+    "Every call returns a SpiderResult you branch on (.success / .failure) instead of throwing; the only thrown error is SpiderContractMismatchError, raised when the gateway speaks a different major contract version than this SDK."
+  ]
+}
