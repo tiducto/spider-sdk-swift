@@ -6,11 +6,11 @@
   "folders": [
     "README.md",
     "Sources/SpiderSDK",
+    "Sources/SpiderContract",
     "Sources/Examples"
   ],
   "excludeFolders": [
     ".build",
-    "Sources/SpiderContract",
     ".github",
     "Tests"
   ],

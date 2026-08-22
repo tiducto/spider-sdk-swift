@@ -52,14 +52,23 @@ func planForTime(client: SpiderClient) async throws {
     _ = result
 }
 
-/// List the next departures from a stop.
+/// List the next departures from a stop, reading both the scheduled and the live realtime fields.
 func departures(client: SpiderClient) async throws {
     // [START departures]
     let result = try await client.routing.departures("U123Z1", numberOfDepartures: 5)
     if case .success(let departures) = result {
         for departure in departures {
-            let when = Date(timeIntervalSince1970: Double(departure.scheduledTimeEpochMs) / 1000)
-            print("\(departure.routeShortName ?? "?") → \(departure.headsign ?? "?") at \(when)")
+            // The scheduled time is always present; the realtime time is filled in once the trip is tracked.
+            let scheduled = Date(timeIntervalSince1970: Double(departure.scheduledTimeEpochMs) / 1000)
+            let route = departure.routeShortName ?? departure.routeLongName ?? "?"
+            let mode = departure.mode?.rawValue ?? "?"
+            print("\(mode) \(route) → \(departure.headsign ?? "?") at \(scheduled)")
+
+            if departure.isRealtime, let liveMs = departure.realtimeTimeEpochMs {
+                let live = Date(timeIntervalSince1970: Double(liveMs) / 1000)
+                let state = departure.realtimeState?.rawValue ?? "UPDATED"
+                print("  live \(state): now \(live) (trip \(departure.tripGtfsId ?? "?"))")
+            }
         }
     }
     // [END departures]
@@ -220,4 +229,66 @@ func wheelchairPlan(client: SpiderClient) async throws {
         }
     }
     // [END wheelchairPlan]
+}
+
+/// Set several optional request options at once — including the transfer cap and the search window.
+func planWithOptions(client: SpiderClient) async throws {
+    // [START planWithOptions]
+    let result = try await client.routing.plan(PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        first: 5,
+        departAt: Date().addingTimeInterval(30 * 60), // leave in half an hour
+        allowedTransitModes: [.tram, .bus, .subway],  // empty (the default) means every mode
+        maxTransfers: 1,                               // at most one transfer
+        searchWindowMinutes: 90                        // widen the window from the 60-minute default
+    ))
+
+    if case .success(let route) = result {
+        for edge in route.edges {
+            print("\(edge.itinerary.durationSeconds / 60) min, \(edge.itinerary.numberOfTransfers) transfers")
+        }
+    }
+    // [END planWithOptions]
+}
+
+/// Branch on the stable `SpiderError.code` taxonomy for programmatic error handling.
+func handleRoutingErrors(client: SpiderClient) async throws {
+    // [START handleErrors]
+    do {
+        let result = try await client.routing.plan(PlanOptions(
+            origin: .coordinate(49.1951, 16.6068),
+            destination: .coordinate(49.2246, 16.5747),
+            first: 3
+        ))
+
+        switch result {
+        case .success(let route):
+            print("\(route.edges.count) itineraries")
+        case .failure(let error):
+            // `error.code` is the stable, language-agnostic category — branch on it, not on `message`.
+            switch error.code {
+            case .unauthorized:
+                print("check your API key (HTTP \(error.httpStatus ?? 0))")
+            case .rateLimited:
+                print("slow down — too many requests")
+            case .timeout:
+                print("the gateway took too long; retry")
+            case .network:
+                print("no connection to the gateway")
+            case .notFound:
+                print("nothing matched this request")
+            case .server:
+                print("gateway error \(error.httpStatus ?? 0), code=\(error.serverCode ?? "?")")
+            case .decoding:
+                print("could not decode the response")
+            case .unknown:
+                print("unexpected failure: \(error.message)")
+            }
+        }
+    } catch let mismatch as SpiderContractMismatchError {
+        // The one failure the SDK throws instead of returning: the gateway speaks a different MAJOR contract version.
+        print("SDK/gateway contract mismatch: \(mismatch.message)")
+    }
+    // [END handleErrors]
 }
