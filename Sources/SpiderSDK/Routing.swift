@@ -111,7 +111,6 @@ public struct TripDetails: Sendable, Equatable {
 public struct PlanOptions: Sendable {
     public let origin: Location
     public let destination: Location
-    public var first: Int?
     public var departAt: Date?
     public var arriveBy: Date?
     public var via: [ViaLocation]
@@ -123,7 +122,6 @@ public struct PlanOptions: Sendable {
     public init(
         origin: Location,
         destination: Location,
-        first: Int? = nil,
         departAt: Date? = nil,
         arriveBy: Date? = nil,
         via: [ViaLocation] = [],
@@ -134,7 +132,6 @@ public struct PlanOptions: Sendable {
     ) {
         self.origin = origin
         self.destination = destination
-        self.first = first
         self.departAt = departAt
         self.arriveBy = arriveBy
         self.via = via
@@ -162,11 +159,9 @@ struct PlanRequest: Sendable, Equatable {
 
 private enum PageDirection { case forward, backward }
 
-// Public methods inline these as literal default arguments (5 / 10 / 360) — public default args cannot
+// Public methods inline these as literal default arguments (10 / 360) — public default args cannot
 // reference non-public symbols. Keep the literals below in sync with these names if you change them.
-private let DEFAULT_FIRST = 5
 private let DEFAULT_SEARCH_WINDOW_MINUTES = 60
-private let MAX_RESULTS_PER_STEP = 50
 private let DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60
 private let ROUTING_INT_MAX = 2_147_483_647
 
@@ -190,22 +185,22 @@ public final class SpiderRouting {
         self.transport = transport
     }
 
-    /// Plans a trip. Returns the first page of itineraries.
+    /// Plans a trip. Returns the first window of itineraries.
     public func plan(_ options: PlanOptions) async throws -> SpiderResult<Route> {
         let request = makeRequest(options)
-        return try await page(request, first: options.first ?? DEFAULT_FIRST)
+        return try await page(request)
     }
 
-    /// The next page after `route`, or nil if there is none.
-    public func planNext(_ route: Route, first: Int = 5) async throws -> SpiderResult<Route>? {
+    /// The next window after `route`, or nil if there is none. Pages forward with `after` (no page-size count).
+    public func planNext(_ route: Route) async throws -> SpiderResult<Route>? {
         guard route.pageInfo.hasNextPage else { return nil }
-        return try await page(route.request, first: first, after: route.pageInfo.endCursor)
+        return try await page(route.request, after: route.pageInfo.endCursor)
     }
 
-    /// The previous page before `route`, or nil if there is none. Pages backward (last + before), Relay-correct.
-    public func planPrevious(_ route: Route, last: Int = 5) async throws -> SpiderResult<Route>? {
+    /// The previous window before `route`, or nil if there is none. Pages backward with `before` (no page-size count).
+    public func planPrevious(_ route: Route) async throws -> SpiderResult<Route>? {
         guard route.pageInfo.hasPreviousPage else { return nil }
-        return try await page(route.request, last: last, before: route.pageInfo.startCursor)
+        return try await page(route.request, before: route.pageInfo.startCursor)
     }
 
     /// Streams itineraries forward, one search window per step, until `targetResults` are collected or
@@ -220,9 +215,7 @@ public final class SpiderRouting {
                 do {
                     let windowMin = options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES
                     let steps = stepCount(maxTraversalMinutes, windowMin)
-                    var opts = options
-                    opts.first = MAX_RESULTS_PER_STEP
-                    let first = try await self.plan(opts)
+                    let first = try await self.plan(options)
                     continuation.yield(first)
                     guard case .success(let route) = first else { continuation.finish(); return }
                     try await self.stepStream(
@@ -316,9 +309,9 @@ public final class SpiderRouting {
         )
     }
 
-    private func page(_ request: PlanRequest, first: Int? = nil, last: Int? = nil, before: String? = nil, after: String? = nil) async throws -> SpiderResult<Route> {
+    private func page(_ request: PlanRequest, before: String? = nil, after: String? = nil) async throws -> SpiderResult<Route> {
         do {
-            return .success(try await fetchPlan(request, first: first, last: last, before: before, after: after))
+            return .success(try await fetchPlan(request, before: before, after: after))
         } catch let error as SpiderContractMismatchError {
             throw error
         } catch {
@@ -326,7 +319,7 @@ public final class SpiderRouting {
         }
     }
 
-    private func fetchPlan(_ request: PlanRequest, first: Int?, last: Int?, before: String?, after: String?) async throws -> Route {
+    private func fetchPlan(_ request: PlanRequest, before: String?, after: String?) async throws -> Route {
         let iso = planIsoFormatter.string(from: request.time)
         let dateTime = request.timeKind == .departAt
             ? PlanDateTimeInput(earliestDeparture: iso)
@@ -339,8 +332,6 @@ public final class SpiderRouting {
             modes: modesInput(request.allowedTransitModes),
             preferences: preferencesInput(request),
             searchWindow: "PT\(max(1, request.searchWindowMinutes))M",
-            first: first,
-            last: last,
             before: before,
             after: after
         )
@@ -399,8 +390,8 @@ public final class SpiderRouting {
         while i < max(0, remainingSteps) {
             if Task.isCancelled { return }
             let result = direction == .forward
-                ? try await planNext(prev, first: MAX_RESULTS_PER_STEP)
-                : try await planPrevious(prev, last: MAX_RESULTS_PER_STEP)
+                ? try await planNext(prev)
+                : try await planPrevious(prev)
             guard let result else { return }
             continuation.yield(result)
             guard case .success(let route) = result else { return }

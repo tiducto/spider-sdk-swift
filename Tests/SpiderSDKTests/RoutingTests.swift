@@ -26,8 +26,7 @@ final class RoutingTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let result = try await client.routing.plan(PlanOptions(
             origin: .coordinate(49.19, 16.61),
-            destination: .coordinate(49.22, 16.52),
-            first: 3
+            destination: .coordinate(49.22, 16.52)
         ))
         guard case .success(let route) = result else { return XCTFail("expected success") }
 
@@ -51,9 +50,10 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "0.1")
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/0.1.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
-        XCTAssertEqual(req.bodyJSON["id"] as? String, "4ce89d3209a478dd7a75d2abffd9956e79e081bfbaeeeae33fb255309c59aa80")
+        XCTAssertEqual(req.bodyJSON["id"] as? String, "2651d04c04415f5ee9130c032feb88371e873be6cb4c05ae0e5615c9bfee60eb")
         let vars = req.bodyJSON["variables"] as! [String: Any]
-        XCTAssertEqual(vars["first"] as? Int, 3)
+        XCTAssertNil(vars["first"])
+        XCTAssertNil(vars["last"])
         XCTAssertEqual(vars["searchWindow"] as? String, "PT60M")
         let dateTime = vars["dateTime"] as! [String: Any]
         XCTAssertNotNil(dateTime["earliestDeparture"])
@@ -110,7 +110,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(dateTime["earliestDeparture"])
     }
 
-    func testPlanNextPagesForwardWithFirstAndAfter() async throws {
+    func testPlanNextPagesForwardWithAfter() async throws {
         let page2 = """
         {"data":{"planConnection":{"edges":[],"pageInfo":{"hasNextPage":false,"hasPreviousPage":true,"startCursor":"c2","endCursor":"c2","searchWindowUsed":"PT60M"},"routingErrors":[],"searchDateTime":null}}}
         """
@@ -125,7 +125,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertNotNil(next)
         let vars = mock.requests[1].bodyJSON["variables"] as! [String: Any]
         XCTAssertEqual(vars["after"] as? String, "c1")
-        XCTAssertEqual(vars["first"] as? Int, 5) // default
+        XCTAssertNil(vars["first"])
         XCTAssertNil(vars["before"])
         XCTAssertNil(vars["last"])
     }

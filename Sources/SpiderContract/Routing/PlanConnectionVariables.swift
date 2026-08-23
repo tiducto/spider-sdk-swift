@@ -6,8 +6,6 @@ public struct PlanConnectionVariables: Codable, Sendable {
     public let modes: PlanModesInput?
     public let preferences: PlanPreferencesInput?
     public let searchWindow: String?
-    public let first: Int?
-    public let last: Int?
     public let before: String?
     public let after: String?
 
@@ -19,8 +17,6 @@ public struct PlanConnectionVariables: Codable, Sendable {
         modes: PlanModesInput? = nil,
         preferences: PlanPreferencesInput? = nil,
         searchWindow: String? = nil,
-        first: Int? = nil,
-        last: Int? = nil,
         before: String? = nil,
         after: String? = nil
     ) {
@@ -31,8 +27,6 @@ public struct PlanConnectionVariables: Codable, Sendable {
         self.modes = modes
         self.preferences = preferences
         self.searchWindow = searchWindow
-        self.first = first
-        self.last = last
         self.before = before
         self.after = after
     }
