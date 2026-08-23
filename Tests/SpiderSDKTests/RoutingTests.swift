@@ -50,7 +50,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "0.1")
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/0.1.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
-        XCTAssertEqual(req.bodyJSON["id"] as? String, "2651d04c04415f5ee9130c032feb88371e873be6cb4c05ae0e5615c9bfee60eb")
+        XCTAssertEqual(req.bodyJSON["id"] as? String, "dad4f190af803a8cb50ec99c5852544297e94db8edc0d94220c8f79d98f065a7")
         let vars = req.bodyJSON["variables"] as! [String: Any]
         XCTAssertNil(vars["first"])
         XCTAssertNil(vars["last"])

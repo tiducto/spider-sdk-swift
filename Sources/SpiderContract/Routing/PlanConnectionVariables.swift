@@ -5,7 +5,7 @@ public struct PlanConnectionVariables: Codable, Sendable {
     public let via: [PlanViaLocationInput]?
     public let modes: PlanModesInput?
     public let preferences: PlanPreferencesInput?
-    public let searchWindow: String?
+    public let searchWindow: String
     public let before: String?
     public let after: String?
 
@@ -16,7 +16,7 @@ public struct PlanConnectionVariables: Codable, Sendable {
         via: [PlanViaLocationInput]? = nil,
         modes: PlanModesInput? = nil,
         preferences: PlanPreferencesInput? = nil,
-        searchWindow: String? = nil,
+        searchWindow: String,
         before: String? = nil,
         after: String? = nil
     ) {
