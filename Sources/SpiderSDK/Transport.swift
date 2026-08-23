@@ -47,6 +47,13 @@ private struct GraphQLEnvelope<D: Decodable>: Decodable {
 
 private struct GraphQLEnvelopeError: Decodable {
     let message: String
+    // Present on validation failures the gateway/router stamp; code == "BAD_REQUEST" + the offending field.
+    let extensions: GraphQLErrorExtensions?
+}
+
+private struct GraphQLErrorExtensions: Decodable {
+    let code: String?
+    let field: String?
 }
 
 struct RawResponse {
@@ -104,6 +111,11 @@ final class Transport {
         }
         let envelope: GraphQLEnvelope<D> = try decode(from: data, where: "routing \(op.path)")
         if let errors = envelope.errors, !errors.isEmpty {
+            // A BAD_REQUEST extension (over-cap searchWindow, bad via, missing required field) → typed
+            // badRequest; anything else stays a generic upstream (→ server).
+            if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
+                throw TransportError(.badRequest, bad.message, field: bad.extensions?.field)
+            }
             let joined = errors.map { $0.message }.joined(separator: ", ")
             throw TransportError(.upstream, "routing \(op.path) errors: \(joined)")
         }

@@ -5,6 +5,7 @@ public enum SpiderErrorCode: String, Sendable {
     case network
     case timeout
     case unauthorized
+    case badRequest = "bad_request"
     case notFound = "not_found"
     case server
     case rateLimited = "rate_limited"
@@ -22,14 +23,18 @@ public struct SpiderError: Error {
     public let httpStatus: Int?
     /// The machine-readable `code` from a server JSON error envelope, when present.
     public let serverCode: String?
+    /// For a `badRequest` (a server validation failure — over-cap `searchWindow`, malformed `via`, or a
+    /// missing required field), the offending input field when the server names one. Nil otherwise.
+    public let field: String?
     /// The underlying error, when one caused this failure.
     public let cause: Error?
 
-    public init(code: SpiderErrorCode, message: String, httpStatus: Int? = nil, serverCode: String? = nil, cause: Error? = nil) {
+    public init(code: SpiderErrorCode, message: String, httpStatus: Int? = nil, serverCode: String? = nil, field: String? = nil, cause: Error? = nil) {
         self.code = code
         self.message = message
         self.httpStatus = httpStatus
         self.serverCode = serverCode
+        self.field = field
         self.cause = cause
     }
 }
@@ -61,6 +66,7 @@ enum TransportErrorKind {
     case http
     case noData
     case upstream
+    case badRequest
 }
 
 struct TransportError: Error {
@@ -68,12 +74,15 @@ struct TransportError: Error {
     let message: String
     let httpStatus: Int?
     let serverCode: String?
+    // Set only for `.badRequest`: the offending input field the server named, if any.
+    let field: String?
 
-    init(_ kind: TransportErrorKind, _ message: String, httpStatus: Int? = nil, serverCode: String? = nil) {
+    init(_ kind: TransportErrorKind, _ message: String, httpStatus: Int? = nil, serverCode: String? = nil, field: String? = nil) {
         self.kind = kind
         self.message = message
         self.httpStatus = httpStatus
         self.serverCode = serverCode
+        self.field = field
     }
 }
 
@@ -115,6 +124,8 @@ func toSpiderError(_ error: Error) -> SpiderError {
             return SpiderError(code: code, message: te.message, httpStatus: status, serverCode: te.serverCode)
         case .noData:
             return SpiderError(code: .notFound, message: te.message)
+        case .badRequest:
+            return SpiderError(code: .badRequest, message: te.message, field: te.field)
         case .upstream:
             return SpiderError(code: .server, message: te.message)
         }

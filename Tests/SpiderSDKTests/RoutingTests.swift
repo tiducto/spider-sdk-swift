@@ -147,6 +147,20 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(error.message.contains("bad var"))
     }
 
+    func testTopLevelBadRequestBecomesBadRequestWithFieldAndMessage() async throws {
+        let body = """
+        {"data":null,"errors":[{"message":"searchWindow exceeds the maximum of PT2H",\
+        "extensions":{"code":"BAD_REQUEST","field":"searchWindow"}}]}
+        """
+        let (client, _) = makeClient { _ in json(body) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .badRequest)
+        XCTAssertEqual(error.code.rawValue, "bad_request")
+        XCTAssertEqual(error.field, "searchWindow")
+        XCTAssertEqual(error.message, "searchWindow exceeds the maximum of PT2H")
+    }
+
     func testContractMismatchThrowsInsteadOfReturning() async throws {
         let (client, _) = makeClient { _ in json(self.planBody, contractVersion: "4.0") }
         do {

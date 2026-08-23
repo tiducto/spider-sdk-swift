@@ -267,6 +267,9 @@ func handleRoutingErrors(client: SpiderClient) async throws {
             switch error.code {
             case .unauthorized:
                 print("check your API key (HTTP \(error.httpStatus ?? 0))")
+            case .badRequest:
+                // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
+                print("invalid request on \(error.field ?? "input"): \(error.message)")
             case .rateLimited:
                 print("slow down — too many requests")
             case .timeout:
