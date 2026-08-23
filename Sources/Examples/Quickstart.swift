@@ -15,7 +15,8 @@ func firstCall() async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1908, 16.6128),
         destination: .coordinate(49.2270, 16.5273),
-        first: 3
+        departAt: Date(),
+        searchWindowMinutes: 60
     ))
     // [END firstCall]
     _ = result
@@ -27,7 +28,8 @@ func handleResult(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1908, 16.6128),
         destination: .coordinate(49.2270, 16.5273),
-        first: 3
+        departAt: Date(),
+        searchWindowMinutes: 60
     ))
 
     switch result {

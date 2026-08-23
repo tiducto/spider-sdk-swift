@@ -15,10 +15,12 @@ func routingSetup() -> SpiderClient {
 /// Plan a trip and walk the itineraries and their legs.
 func planTrip(client: SpiderClient) async throws {
     // [START planTrip]
+    // The recommended shape: a departure time plus a search window, not "N results from now".
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3
+        departAt: Date(),
+        searchWindowMinutes: 60
     ))
 
     switch result {
@@ -45,8 +47,8 @@ func planForTime(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3,
-        departAt: inOneHour
+        departAt: inOneHour,
+        searchWindowMinutes: 30
     ))
     // [END planForTime]
     _ = result
@@ -144,8 +146,8 @@ func arriveBy(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3,
-        arriveBy: deadline
+        arriveBy: deadline,
+        searchWindowMinutes: 60
     ))
 
     switch result {
@@ -259,7 +261,8 @@ func handleRoutingErrors(client: SpiderClient) async throws {
         let result = try await client.routing.plan(PlanOptions(
             origin: .coordinate(49.1951, 16.6068),
             destination: .coordinate(49.2246, 16.5747),
-            first: 3
+            departAt: Date(),
+            searchWindowMinutes: 60
         ))
 
         switch result {

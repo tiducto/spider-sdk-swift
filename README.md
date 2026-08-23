@@ -33,7 +33,8 @@ let client = SpiderClient(baseURL: "https://your-env-slug.api.tiducto.eu", apiKe
 let result = try await client.routing.plan(PlanOptions(
     origin: .coordinate(49.19, 16.61),
     destination: .coordinate(49.23, 16.53),
-    first: 3
+    departAt: Date(),        // leave now…
+    searchWindowMinutes: 60  // …and scan the next 60 minutes
 ))
 
 switch result {
@@ -46,6 +47,8 @@ case .failure(let error):
     print("plan failed: \(error.code) — \(error.message)")
 }
 ```
+
+The recommended query pins a time and a window — a departure time (`departAt`) or an arrival deadline (`arriveBy`) together with `searchWindowMinutes` — rather than asking for _N_ results from "now". Widen the window for sparse or intercity routes, and page with `first` + `planNext`.
 
 Ordinary failures are values — every call returns a `SpiderResult<T>` you branch on. The one thrown error is `SpiderContractMismatchError`, raised when the gateway speaks a different **major** contract version than this SDK.
 
