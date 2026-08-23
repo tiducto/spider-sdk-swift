@@ -111,8 +111,7 @@ final class Transport {
         }
         let envelope: GraphQLEnvelope<D> = try decode(from: data, where: "routing \(op.path)")
         if let errors = envelope.errors, !errors.isEmpty {
-            // A BAD_REQUEST extension (over-cap searchWindow, bad via, missing required field) → typed
-            // badRequest; anything else stays a generic upstream (→ server).
+            // A BAD_REQUEST extension maps to typed badRequest; anything else stays a generic upstream.
             if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
                 throw TransportError(.badRequest, bad.message, field: bad.extensions?.field)
             }
