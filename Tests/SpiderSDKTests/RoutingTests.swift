@@ -26,8 +26,7 @@ final class RoutingTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let result = try await client.routing.plan(PlanOptions(
             origin: .coordinate(49.19, 16.61),
-            destination: .coordinate(49.22, 16.52),
-            first: 3
+            destination: .coordinate(49.22, 16.52)
         ))
         guard case .success(let route) = result else { return XCTFail("expected success") }
 
@@ -51,9 +50,10 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "0.1")
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/0.1.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
-        XCTAssertEqual(req.bodyJSON["id"] as? String, "4ce89d3209a478dd7a75d2abffd9956e79e081bfbaeeeae33fb255309c59aa80")
+        XCTAssertEqual(req.bodyJSON["id"] as? String, "dad4f190af803a8cb50ec99c5852544297e94db8edc0d94220c8f79d98f065a7")
         let vars = req.bodyJSON["variables"] as! [String: Any]
-        XCTAssertEqual(vars["first"] as? Int, 3)
+        XCTAssertNil(vars["first"])
+        XCTAssertNil(vars["last"])
         XCTAssertEqual(vars["searchWindow"] as? String, "PT60M")
         let dateTime = vars["dateTime"] as! [String: Any]
         XCTAssertNotNil(dateTime["earliestDeparture"])
@@ -110,7 +110,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(dateTime["earliestDeparture"])
     }
 
-    func testPlanNextPagesForwardWithFirstAndAfter() async throws {
+    func testPlanNextPagesForwardWithAfter() async throws {
         let page2 = """
         {"data":{"planConnection":{"edges":[],"pageInfo":{"hasNextPage":false,"hasPreviousPage":true,"startCursor":"c2","endCursor":"c2","searchWindowUsed":"PT60M"},"routingErrors":[],"searchDateTime":null}}}
         """
@@ -125,7 +125,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertNotNil(next)
         let vars = mock.requests[1].bodyJSON["variables"] as! [String: Any]
         XCTAssertEqual(vars["after"] as? String, "c1")
-        XCTAssertEqual(vars["first"] as? Int, 5) // default
+        XCTAssertNil(vars["first"])
         XCTAssertNil(vars["before"])
         XCTAssertNil(vars["last"])
     }
@@ -145,6 +145,20 @@ final class RoutingTests: XCTestCase {
         guard case .failure(let error) = result else { return XCTFail("expected failure") }
         XCTAssertEqual(error.code, .server)
         XCTAssertTrue(error.message.contains("bad var"))
+    }
+
+    func testTopLevelBadRequestBecomesBadRequestWithFieldAndMessage() async throws {
+        let body = """
+        {"data":null,"errors":[{"message":"searchWindow exceeds the maximum of PT2H",\
+        "extensions":{"code":"BAD_REQUEST","field":"searchWindow"}}]}
+        """
+        let (client, _) = makeClient { _ in json(body) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .badRequest)
+        XCTAssertEqual(error.code.rawValue, "bad_request")
+        XCTAssertEqual(error.field, "searchWindow")
+        XCTAssertEqual(error.message, "searchWindow exceeds the maximum of PT2H")
     }
 
     func testContractMismatchThrowsInsteadOfReturning() async throws {

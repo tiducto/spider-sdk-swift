@@ -15,10 +15,12 @@ func routingSetup() -> SpiderClient {
 /// Plan a trip and walk the itineraries and their legs.
 func planTrip(client: SpiderClient) async throws {
     // [START planTrip]
+    // The recommended shape: a departure time plus a search window, not "N results from now".
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3
+        departAt: Date(),
+        searchWindowMinutes: 60
     ))
 
     switch result {
@@ -45,8 +47,8 @@ func planForTime(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3,
-        departAt: inOneHour
+        departAt: inOneHour,
+        searchWindowMinutes: 30
     ))
     // [END planForTime]
     _ = result
@@ -79,15 +81,14 @@ func laterItineraries(client: SpiderClient) async throws {
     // [START laterItineraries]
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
-        destination: .coordinate(49.2246, 16.5747),
-        first: 3
+        destination: .coordinate(49.2246, 16.5747)
     ))
 
     switch result {
     case .success(let firstPage):
         // planNext returns nil when there is no further page.
         guard let next = try await client.routing.planNext(firstPage) else {
-            print("No later itineraries — that was the last page")
+            print("No later itineraries — that was the last window")
             return
         }
         switch next {
@@ -124,7 +125,6 @@ func planWithModes(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3,
         allowedTransitModes: [.tram, .subway]
     ))
 
@@ -144,8 +144,8 @@ func arriveBy(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3,
-        arriveBy: deadline
+        arriveBy: deadline,
+        searchWindowMinutes: 60
     ))
 
     switch result {
@@ -164,15 +164,14 @@ func earlierItineraries(client: SpiderClient) async throws {
     // [START earlierItineraries]
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
-        destination: .coordinate(49.2246, 16.5747),
-        first: 3
+        destination: .coordinate(49.2246, 16.5747)
     ))
 
     switch result {
     case .success(let firstPage):
         // planPrevious returns nil when there is no earlier page.
         guard let previous = try await client.routing.planPrevious(firstPage) else {
-            print("No earlier itineraries — that was the first page")
+            print("No earlier itineraries — that was the first window")
             return
         }
         switch previous {
@@ -195,7 +194,6 @@ func planVia(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3,
         via: [.visit(.coordinate(49.2002, 16.6110), minimumWaitSeconds: 300)]
     ))
 
@@ -213,7 +211,6 @@ func wheelchairPlan(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 3,
         wheelchairAccessible: true
     ))
 
@@ -237,7 +234,6 @@ func planWithOptions(client: SpiderClient) async throws {
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        first: 5,
         departAt: Date().addingTimeInterval(30 * 60), // leave in half an hour
         allowedTransitModes: [.tram, .bus, .subway],  // empty (the default) means every mode
         maxTransfers: 1,                               // at most one transfer
@@ -259,7 +255,8 @@ func handleRoutingErrors(client: SpiderClient) async throws {
         let result = try await client.routing.plan(PlanOptions(
             origin: .coordinate(49.1951, 16.6068),
             destination: .coordinate(49.2246, 16.5747),
-            first: 3
+            departAt: Date(),
+            searchWindowMinutes: 60
         ))
 
         switch result {
@@ -270,6 +267,9 @@ func handleRoutingErrors(client: SpiderClient) async throws {
             switch error.code {
             case .unauthorized:
                 print("check your API key (HTTP \(error.httpStatus ?? 0))")
+            case .badRequest:
+                // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
+                print("invalid request on \(error.field ?? "input"): \(error.message)")
             case .rateLimited:
                 print("slow down — too many requests")
             case .timeout:
