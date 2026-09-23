@@ -81,11 +81,20 @@ final class Transport {
 
     // MARK: request building
 
-    private func request(url: URL, method: String, body: Data?, json: Bool) -> URLRequest {
+    /// The one place the Transport stamps the client `apikey`. The key is invariant for a client's whole
+    /// life, so every `URLRequest` the Transport builds — real contract calls and the warm-up probe alike —
+    /// funnels through here and gets the shared auth header exactly once. Contract/sdk headers are added on
+    /// top only for real calls (see `request`); the warm-up carries just this shared stamp.
+    private func makeRequest(url: URL, method: String) -> URLRequest {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = config.timeout
         req.setValue(apiKey, forHTTPHeaderField: "apikey")
+        return req
+    }
+
+    private func request(url: URL, method: String, body: Data?, json: Bool) -> URLRequest {
+        var req = makeRequest(url: url, method: method)
         req.setValue(CONTRACT_VERSION, forHTTPHeaderField: CONTRACT_HEADER)
         req.setValue(SDK_IDENTITY, forHTTPHeaderField: SDK_HEADER)
         if json { req.setValue("application/json", forHTTPHeaderField: "content-type") }
@@ -172,17 +181,15 @@ final class Transport {
     // MARK: warm-up
 
     /// Best-effort probe of `GET {baseURL}/ping` to open the TLS connection real calls reuse.
-    /// Authenticated with the client apikey (like every real call), but sends none of the contract
-    /// headers — `/ping` is not contract-gated. Never throws: a transport error or any non-2xx status
-    /// (including a 401/404 before the keyed gateway route deploys) still warms the connection.
-    /// Returns the elapsed wall-clock time in seconds.
+    /// Authenticated with the client apikey (like every real call) via the Transport's shared
+    /// request-builder, but sends none of the contract headers — `/ping` is not contract-gated. Never
+    /// throws: a transport error or any non-2xx status (including a 401/404 before the keyed gateway route
+    /// deploys) still warms the connection. Returns the elapsed wall-clock time in seconds.
     func warmup() async -> TimeInterval {
         let start = Date()
         if let url = URL(string: "\(baseURL)/ping") {
-            var req = URLRequest(url: url)
-            req.httpMethod = "GET"
-            req.timeoutInterval = config.timeout
-            req.setValue(apiKey, forHTTPHeaderField: "apikey")
+            // apikey comes from the Transport's shared request-builder; no contract/sdk headers here.
+            let req = makeRequest(url: url, method: "GET")
             // No retry, no contract check: a single fire-and-forget probe whose only job is the connection.
             do {
                 _ = try await config.httpClient.send(req)
