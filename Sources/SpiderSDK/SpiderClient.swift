@@ -76,10 +76,10 @@ public final class SpiderClient {
     /// departures, …) rides an already-open TLS connection instead of paying the cold-connect cost — which
     /// is ~0.6s on mobile and nearly doubles that first request.
     ///
-    /// Issues a single keyless `GET {baseURL}/ping` through the SDK's shared `URLSession`, so the connection
-    /// it opens is the one subsequent calls reuse. Best-effort and never throws: any transport error or
-    /// non-2xx status (including a 404 before the gateway `/ping` route deploys) still warms the connection
-    /// and returns the measured elapsed time.
+    /// Issues a single `GET {baseURL}/ping` (authenticated with the client apikey) through the SDK's shared
+    /// `URLSession`, so the connection it opens is the one subsequent calls reuse. Best-effort and never
+    /// throws: any transport error or non-2xx status (including a 401/404 before the keyed gateway `/ping`
+    /// route deploys) still warms the connection and returns the measured elapsed time.
     ///
     /// Recommended: call once at app start or on foreground, fire-and-forget:
     /// `Task { await client.warmup() }`.

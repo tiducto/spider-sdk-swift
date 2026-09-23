@@ -7,13 +7,13 @@ import FoundationNetworking
 #endif
 
 final class WarmupTests: XCTestCase {
-    func testWarmupGetsPingKeylessAndReturnsElapsed() async throws {
+    func testWarmupGetsPingWithApiKeyAndReturnsElapsed() async throws {
         let (client, mock) = makeClient { _ in json("pong") }
         let elapsed = await client.warmup()
         let req = mock.requests[0]
         XCTAssertEqual(req.path, "/ping")
         XCTAssertEqual(req.httpMethod, "GET")
-        XCTAssertNil(req.value(forHTTPHeaderField: "apikey")) // /ping is keyless
+        XCTAssertEqual("secret-key", req.value(forHTTPHeaderField: "apikey")) // /ping is keyed on the client apikey
         XCTAssertGreaterThanOrEqual(elapsed, 0)
     }
 
