@@ -169,6 +169,28 @@ final class Transport {
         return RawResponse(ok: (200..<300).contains(response.statusCode), status: response.statusCode, data: data)
     }
 
+    // MARK: warm-up
+
+    /// Best-effort keyless probe of `GET {baseURL}/ping` to open the TLS connection real calls reuse.
+    /// Sent through the shared HTTP client (URLSession) with no apikey/auth header — `/ping` is keyless.
+    /// Never throws: a transport error or any non-2xx status (including a 404 before the gateway route
+    /// deploys) still warms the connection. Returns the elapsed wall-clock time in seconds.
+    func warmup() async -> TimeInterval {
+        let start = Date()
+        if let url = URL(string: "\(baseURL)/ping") {
+            var req = URLRequest(url: url)
+            req.httpMethod = "GET"
+            req.timeoutInterval = config.timeout
+            // No retry, no contract check: a single fire-and-forget probe whose only job is the connection.
+            do {
+                _ = try await config.httpClient.send(req)
+            } catch {
+                // Swallowed on purpose — a failed probe still opened (or attempted) the connection.
+            }
+        }
+        return Date().timeIntervalSince(start)
+    }
+
     // MARK: retry + backoff
 
     private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {

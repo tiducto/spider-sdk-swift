@@ -46,6 +46,10 @@ public final class SpiderClient {
     public let stops: SpiderStops
     public let realtime: SpiderRealtime
 
+    // Shares the same HTTP client (URLSession) as every surface, so the connection `warmup()` opens is the
+    // one real calls reuse. No retry — a single best-effort probe.
+    private let warmupTransport: Transport
+
     public init(baseURL: String, apiKey: String, options: SpiderClientOptions = SpiderClientOptions()) {
         let httpClient = options.httpClient ?? URLSessionHTTPClient()
         let timeout = options.timeout ?? 30
@@ -62,8 +66,27 @@ public final class SpiderClient {
         self.routing = SpiderRouting(transport: transport(options.routing))
         self.stops = SpiderStops(transport: transport(options.stops))
         self.realtime = SpiderRealtime(transport: transport(options.realtime))
+        self.warmupTransport = transport(nil)
     }
 
     /// The contract (major.minor) version this SDK speaks.
     public var contractVersion: String { CONTRACT_VERSION }
+
+    /// Pre-warms the network connection to the environment API host so the first real call (trip planning,
+    /// departures, …) rides an already-open TLS connection instead of paying the cold-connect cost — which
+    /// is ~0.6s on mobile and nearly doubles that first request.
+    ///
+    /// Issues a single keyless `GET {baseURL}/ping` through the SDK's shared `URLSession`, so the connection
+    /// it opens is the one subsequent calls reuse. Best-effort and never throws: any transport error or
+    /// non-2xx status (including a 404 before the gateway `/ping` route deploys) still warms the connection
+    /// and returns the measured elapsed time.
+    ///
+    /// Recommended: call once at app start or on foreground, fire-and-forget:
+    /// `Task { await client.warmup() }`.
+    ///
+    /// - Returns: the elapsed wall-clock time of the probe, in seconds.
+    @discardableResult
+    public func warmup() async -> TimeInterval {
+        await warmupTransport.warmup()
+    }
 }
