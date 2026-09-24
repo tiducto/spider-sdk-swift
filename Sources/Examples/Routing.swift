@@ -105,6 +105,41 @@ func laterItineraries(client: SpiderClient) async throws {
     // [END laterItineraries]
 }
 
+/// Stream itineraries as the router sweeps the window, then continue forward from the terminal page's cursor.
+func streamItineraries(client: SpiderClient) async throws {
+    // [START streamItineraries]
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        departAt: Date()
+    )
+
+    // planStream emits `.result` batches as itineraries finalize, then a terminal `.done` (or `.failure`).
+    var pageInfo: RoutePageInfo?
+    for await event in client.routing.planStream(options, targetResults: 5) {
+        switch event {
+        case .result(let itineraries):
+            for itinerary in itineraries {
+                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?"), \(itinerary.numberOfTransfers) transfers")
+            }
+        case .done(let info):
+            pageInfo = info // cursors + hasNextPage/hasPreviousPage for the continuation
+        case .failure(let error):
+            print("stream failed: \(error.message)")
+        }
+    }
+
+    // Continue forward only when the terminal page says there is more, using its endCursor.
+    if let pageInfo, pageInfo.hasNextPage, let cursor = pageInfo.endCursor {
+        for await event in client.routing.planStreamNext(options, targetResults: 5, after: cursor) {
+            if case .result(let itineraries) = event {
+                print("+\(itineraries.count) later itineraries")
+            }
+        }
+    }
+    // [END streamItineraries]
+}
+
 /// Look up a single trip's timetable.
 func tripLookup(client: SpiderClient) async throws {
     // [START tripLookup]

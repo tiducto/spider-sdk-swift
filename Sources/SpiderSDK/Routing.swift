@@ -170,8 +170,6 @@ struct PlanRequest: Sendable, Equatable {
     let wheelchairAccessible: Bool
 }
 
-private enum PageDirection { case forward, backward }
-
 // Public methods inline these as literal default arguments (10 / 360) — public default args cannot
 // reference non-public symbols. Keep the literals below in sync with these names if you change them.
 private let DEFAULT_SEARCH_WINDOW_MINUTES = 60
@@ -216,68 +214,55 @@ public final class SpiderRouting {
         return try await page(route.request, before: route.pageInfo.startCursor)
     }
 
-    /// Streams itineraries forward, one search window per step, until `targetResults` are collected or
-    /// `maxTraversalMinutes` of time is traversed. Lazy: stop iterating to skip the remaining searches.
-    public func planUntil(
-        _ options: PlanOptions,
-        targetResults: Int = 10,
-        maxTraversalMinutes: Int = 360
-    ) -> AsyncThrowingStream<SpiderResult<Route>, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let windowMin = options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES
-                    let steps = stepCount(maxTraversalMinutes, windowMin)
-                    let first = try await self.plan(options)
-                    continuation.yield(first)
-                    guard case .success(let route) = first else { continuation.finish(); return }
-                    try await self.stepStream(
-                        from: route, direction: .forward, remainingSteps: steps - 1,
-                        targetResults: targetResults, collectedSoFar: route.edges.count, continuation: continuation
-                    )
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    /// Streaming form of `planNext`: steps forward from `prev`.
-    public func planNextUntil(
-        _ prev: Route,
-        targetResults: Int = 10,
-        maxTraversalMinutes: Int = 360
-    ) -> AsyncThrowingStream<SpiderResult<Route>, Error> {
-        streamFrom(prev, direction: .forward, targetResults: targetResults, maxTraversalMinutes: maxTraversalMinutes)
-    }
-
-    /// Streaming form of `planPrevious`: steps backward from `prev`.
-    public func planPreviousUntil(
-        _ prev: Route,
-        targetResults: Int = 10,
-        maxTraversalMinutes: Int = 360
-    ) -> AsyncThrowingStream<SpiderResult<Route>, Error> {
-        streamFrom(prev, direction: .backward, targetResults: targetResults, maxTraversalMinutes: maxTraversalMinutes)
-    }
-
-    /// Streams itineraries over Server-Sent Events as the router sweeps the search window forward, emitting
-    /// them as they finalize instead of one batched page. Cold and cancellable: iterating starts the request,
-    /// cancelling the consuming task stops the sweep. Each `.chunk` carries itineraries with realtime delays
-    /// already applied to their legs; a `.page` then carries the continuation cursors and a `.done` closes the
-    /// stream (or a terminal `.failure`, which is yielded — never thrown).
+    /// Streams the initial search window over Server-Sent Events as the router sweeps it, emitting itineraries
+    /// as they finalize instead of one batched page. Cold and cancellable: iterating starts the request,
+    /// cancelling the consuming task stops the sweep. Each `.result` carries a batch of itineraries with
+    /// realtime delays already applied to their legs; a terminal `.done` then carries the continuation cursors
+    /// (or a terminal `.failure`, which is yielded — never thrown).
     ///
-    /// `targetResults` is a soft floor the sweep aims to reach; `maxWindowMinutes` caps how far forward it
-    /// searches. To continue, re-call with the same `options` plus `after` = the last `RoutePageInfo.endCursor`
-    /// (or `before` = `startCursor` to walk earlier). `options.searchWindowMinutes` is ignored — the stream
-    /// paces itself. For a single batched page instead, use `plan`.
+    /// `targetResults` is a soft floor the sweep aims to reach; `maxWindowMinutes` caps how far it searches.
+    /// To continue, read `done.pageInfo` and call `planStreamNext(..., after: done.pageInfo.endCursor)` (when
+    /// `hasNextPage`) or `planStreamPrevious(..., before: done.pageInfo.startCursor)` (when `hasPreviousPage`).
+    /// `options.searchWindowMinutes` is ignored — the stream paces itself. For a single batched page, use `plan`.
     public func planStream(
         _ options: PlanOptions,
         targetResults: Int = 5,
+        maxWindowMinutes: Int = 360
+    ) -> AsyncStream<PlanStreamEvent> {
+        planStreamInternal(options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes, after: nil, before: nil)
+    }
+
+    /// Continues a plan stream forward from `after` — the `endCursor` of a prior stream's terminal `.done`
+    /// `RoutePageInfo` (only meaningful when that page's `hasNextPage` is true). Repeats `planStream`'s inputs
+    /// so `targetResults` / `maxWindowMinutes` can differ per continuation. Same event contract as `planStream`.
+    public func planStreamNext(
+        _ options: PlanOptions,
+        targetResults: Int = 5,
         maxWindowMinutes: Int = 360,
-        after: String? = nil,
-        before: String? = nil
+        after: String
+    ) -> AsyncStream<PlanStreamEvent> {
+        planStreamInternal(options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes, after: after, before: nil)
+    }
+
+    /// Continues a plan stream backward from `before` — the `startCursor` of a prior stream's terminal `.done`
+    /// `RoutePageInfo` (only meaningful when that page's `hasPreviousPage` is true). Repeats `planStream`'s
+    /// inputs so `targetResults` / `maxWindowMinutes` can differ per continuation. Same event contract as
+    /// `planStream`.
+    public func planStreamPrevious(
+        _ options: PlanOptions,
+        targetResults: Int = 5,
+        maxWindowMinutes: Int = 360,
+        before: String
+    ) -> AsyncStream<PlanStreamEvent> {
+        planStreamInternal(options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes, after: nil, before: before)
+    }
+
+    private func planStreamInternal(
+        _ options: PlanOptions,
+        targetResults: Int,
+        maxWindowMinutes: Int,
+        after: String?,
+        before: String?
     ) -> AsyncStream<PlanStreamEvent> {
         AsyncStream { continuation in
             let task = Task {
@@ -399,49 +384,34 @@ public final class SpiderRouting {
         return Route(edges: edges, pageInfo: pageInfo, routingErrors: routingErrors, searchDateTime: plan.searchDateTime, request: request)
     }
 
-    private func streamFrom(_ prev: Route, direction: PageDirection, targetResults: Int, maxTraversalMinutes: Int) -> AsyncThrowingStream<SpiderResult<Route>, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let steps = stepCount(maxTraversalMinutes, prev.request.searchWindowMinutes)
-                    try await self.stepStream(
-                        from: prev, direction: direction, remainingSteps: steps,
-                        targetResults: targetResults, collectedSoFar: 0, continuation: continuation
-                    )
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    private func stepStream(
-        from start: Route,
-        direction: PageDirection,
-        remainingSteps: Int,
+    // Builds the SSE stream request variables from a plan request plus paging cursors. Internal seam so the
+    // continuation routing (`planStreamNext` → `after`, `planStreamPrevious` → `before`) is unit-testable
+    // without a live stream. `options.searchWindowMinutes` is intentionally not sent — the stream paces itself
+    // via `targetResults` / `maxWindow`.
+    func streamVariables(
+        _ options: PlanOptions,
         targetResults: Int,
-        collectedSoFar: Int,
-        continuation: AsyncThrowingStream<SpiderResult<Route>, Error>.Continuation
-    ) async throws {
-        if collectedSoFar >= targetResults { return }
-        var prev = start
-        var collected = collectedSoFar
-        var i = 0
-        while i < max(0, remainingSteps) {
-            if Task.isCancelled { return }
-            let result = direction == .forward
-                ? try await planNext(prev)
-                : try await planPrevious(prev)
-            guard let result else { return }
-            continuation.yield(result)
-            guard case .success(let route) = result else { return }
-            collected += route.edges.count
-            if collected >= targetResults { return }
-            prev = route
-            i += 1
-        }
+        maxWindowMinutes: Int,
+        after: String?,
+        before: String?
+    ) -> PlanConnectionStreamVariables {
+        let request = makeRequest(options)
+        let iso = planIsoFormatter.string(from: request.time)
+        let dateTime = request.timeKind == .departAt
+            ? PlanDateTimeInput(earliestDeparture: iso)
+            : PlanDateTimeInput(latestArrival: iso)
+        return PlanConnectionStreamVariables(
+            dateTime: dateTime,
+            origin: locationToInput(request.origin),
+            destination: locationToInput(request.destination),
+            via: request.via.isEmpty ? nil : request.via.map(viaToInput),
+            modes: modesInput(request.allowedTransitModes),
+            preferences: preferencesInput(request),
+            targetResults: targetResults,
+            maxWindow: "PT\(max(1, maxWindowMinutes))M",
+            before: before,
+            after: after
+        )
     }
 
     // Runs the SSE `plan-stream` request and pumps parsed events into the continuation. Uses
@@ -457,22 +427,8 @@ public final class SpiderRouting {
         before: String?,
         into continuation: AsyncStream<PlanStreamEvent>.Continuation
     ) async {
-        let request = makeRequest(options)
-        let iso = planIsoFormatter.string(from: request.time)
-        let dateTime = request.timeKind == .departAt
-            ? PlanDateTimeInput(earliestDeparture: iso)
-            : PlanDateTimeInput(latestArrival: iso)
-        let variables = PlanConnectionStreamVariables(
-            dateTime: dateTime,
-            origin: locationToInput(request.origin),
-            destination: locationToInput(request.destination),
-            via: request.via.isEmpty ? nil : request.via.map(viaToInput),
-            modes: modesInput(request.allowedTransitModes),
-            preferences: preferencesInput(request),
-            targetResults: targetResults,
-            maxWindow: "PT\(max(1, maxWindowMinutes))M",
-            before: before,
-            after: after
+        let variables = streamVariables(
+            options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes, after: after, before: before
         )
 
         let urlRequest: URLRequest
@@ -706,20 +662,12 @@ private func clampSeconds(_ seconds: Int) -> Int {
     max(0, min(seconds, ROUTING_INT_MAX))
 }
 
-// Each cursor step advances a full (fixed) search window, so steps to cover the total time is a plain division.
-private func stepCount(_ maxTraversalMinutes: Int, _ stepMinutes: Int) -> Int {
-    max(1, maxTraversalMinutes / max(1, stepMinutes))
-}
-
 // MARK: - SSE plan-stream parsing
 
 // The SSE event name a record defaults to when the server sends only `data:` lines.
 private let SSE_DEFAULT_EVENT = "message"
 
 private struct StreamChunkData: Decodable {
-    let frontier: Int?
-    let found: Int?
-    let finalized: Int?
     let results: [SpiderContract.Itinerary]?
 }
 
@@ -729,13 +677,6 @@ private struct StreamPageInfoData: Decodable {
     let hasNextPage: Bool?
     let hasPreviousPage: Bool?
     let searchWindowUsed: String?
-}
-
-private struct StreamDoneData: Decodable {
-    let iterations: Int?
-    let windowSeconds: Int?
-    let resultCount: Int?
-    let stoppedBy: String?
 }
 
 private struct StreamErrorData: Decodable {
@@ -754,7 +695,8 @@ private struct StreamGraphQLErrorExtensions: Decodable {
 }
 
 // Parses one finished SSE record (event name + accumulated data) into a `PlanStreamEvent`; returns nil for
-// records the SDK doesn't surface (heartbeats, unknown events, blank data). A malformed payload becomes a
+// records the SDK doesn't surface (heartbeats, unknown events, blank data, and the server's terminal `done`
+// telemetry frame — the `pageInfo` frame is the terminal event the SDK exposes). A malformed payload becomes a
 // terminal `.failure` rather than tearing the stream down. `internal` so the wire-contract test drives it.
 func parsePlanStreamRecord(event: String, data: String) -> PlanStreamEvent? {
     guard !data.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
@@ -764,19 +706,14 @@ func parsePlanStreamRecord(event: String, data: String) -> PlanStreamEvent? {
     case "chunk":
         do {
             let chunk = try decoder.decode(StreamChunkData.self, from: bytes)
-            return .chunk(
-                frontierSeconds: chunk.frontier ?? 0,
-                found: chunk.found ?? 0,
-                finalized: chunk.finalized ?? 0,
-                itineraries: (chunk.results ?? []).map(mapItinerary)
-            )
+            return .result((chunk.results ?? []).map(mapItinerary))
         } catch {
             return .failure(toSpiderError(SpiderDecodingError(message: "failed to decode plan-stream chunk", cause: error)))
         }
     case "pageInfo":
         do {
             let page = try decoder.decode(StreamPageInfoData.self, from: bytes)
-            return .page(RoutePageInfo(
+            return .done(RoutePageInfo(
                 startCursor: page.startCursor,
                 endCursor: page.endCursor,
                 hasNextPage: page.hasNextPage ?? false,
@@ -787,17 +724,8 @@ func parsePlanStreamRecord(event: String, data: String) -> PlanStreamEvent? {
             return .failure(toSpiderError(SpiderDecodingError(message: "failed to decode plan-stream pageInfo", cause: error)))
         }
     case "done":
-        do {
-            let done = try decoder.decode(StreamDoneData.self, from: bytes)
-            return .done(
-                iterations: done.iterations ?? 0,
-                windowSeconds: done.windowSeconds ?? 0,
-                resultCount: done.resultCount ?? 0,
-                stoppedBy: done.stoppedBy ?? "unknown"
-            )
-        } catch {
-            return .failure(toSpiderError(SpiderDecodingError(message: "failed to decode plan-stream done", cause: error)))
-        }
+        // Terminal server telemetry — it only marks the sweep's end; `pageInfo` already carried the cursors.
+        return nil
     case "error":
         return .failure(streamErrorToSpiderError(data))
     default:

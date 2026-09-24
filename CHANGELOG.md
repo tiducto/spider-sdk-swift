@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.1
+
+### Changed
+
+- The streaming plan surface is reshaped around cursor continuation. `planStream(_:targetResults:maxWindowMinutes:)`
+  streams the initial window; `planStreamNext(_:targetResults:maxWindowMinutes:after:)` and
+  `planStreamPrevious(_:targetResults:maxWindowMinutes:before:)` continue forward/backward from a raw cursor
+  string. `PlanStreamEvent` is now three variants — `.result([Itinerary])` (a batch of finalized itineraries as
+  the sweep advances), `.done(RoutePageInfo)` (terminal; carries the continuation cursors `endCursor` /
+  `startCursor` and `hasNextPage` / `hasPreviousPage`), and `.failure(SpiderError)` (terminal, yielded not
+  thrown). Read `done.pageInfo` to decide whether and how to continue.
+
+### Removed
+
+- `planUntil` / `planNextUntil` / `planPreviousUntil` — the client-side window-walkers. Drive the sweep with
+  `planStream` plus `planStreamNext` / `planStreamPrevious`, continuing from the terminal `.done` page's cursors.
+
 ## 0.7.0
 
 Syncs to Spider API contract 0.7 and brings the SDK to parity with the reference SDKs.
