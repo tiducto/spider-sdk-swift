@@ -328,10 +328,10 @@ public final class SpiderRouting {
             dateTime: dateTime,
             origin: locationToInput(request.origin),
             destination: locationToInput(request.destination),
+            searchWindow: "PT\(max(1, request.searchWindowMinutes))M",
             via: request.via.isEmpty ? nil : request.via.map(viaToInput),
             modes: modesInput(request.allowedTransitModes),
             preferences: preferencesInput(request),
-            searchWindow: "PT\(max(1, request.searchWindowMinutes))M",
             before: before,
             after: after
         )
