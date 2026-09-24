@@ -84,6 +84,7 @@ final class RoutingTests: XCTestCase {
             origin: .coordinate(49.19, 16.61),
             destination: .coordinate(49.22, 16.52),
             allowedTransitModes: [.bus, .walk, .tram], // WALK dropped (not a wire transit mode)
+            // 2 transfers ⇒ wire maximumTransfers = 3 (the router counts boardings = transfers + 1).
             maxTransfers: 2,
             searchWindowMinutes: 30,
             wheelchairAccessible: true
@@ -94,7 +95,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(transit.map { $0["mode"] as? String }, ["BUS", "TRAM"])
         let prefs = vars["preferences"] as! [String: Any]
         let maxTransfers = ((prefs["transit"] as! [String: Any])["transfer"] as! [String: Any])["maximumTransfers"] as? Int
-        XCTAssertEqual(maxTransfers, 2)
+        XCTAssertEqual(maxTransfers, 3)
         let enabled = ((prefs["accessibility"] as! [String: Any])["wheelchair"] as! [String: Any])["enabled"] as? Bool
         XCTAssertEqual(enabled, true)
     }

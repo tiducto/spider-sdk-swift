@@ -439,7 +439,10 @@ private func modesInput(_ modes: [TransitMode]) -> PlanModesInput? {
 }
 
 private func preferencesInput(_ request: PlanRequest) -> PlanPreferencesInput? {
-    let transit = request.maxTransfers.map { TransitPreferencesInput(transfer: TransferPreferencesInput(maximumTransfers: $0)) }
+    // The router indexes legs with leg 0 = the initial access (walk, or nothing), so its wire
+    // `maximumTransfers` counts boardings = transfers + 1 (wire 0 = walk-only, not exposed here).
+    // `maxTransfers` is a transfer count, so map it to boardings: 0 transfers = 1 boarding (direct).
+    let transit = request.maxTransfers.map { TransitPreferencesInput(transfer: TransferPreferencesInput(maximumTransfers: $0 + 1)) }
     let accessibility = request.wheelchairAccessible
         ? AccessibilityPreferencesInput(wheelchair: WheelchairPreferencesInput(enabled: true))
         : nil
