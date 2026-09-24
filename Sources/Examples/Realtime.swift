@@ -29,9 +29,11 @@ func setupWithRetry() -> SpiderClient {
 /// A hand-rolled poll loop: fetch delays roughly every 15 seconds until the task is cancelled.
 func poll(client: SpiderClient) async throws {
     // [START poll]
+    // Group trip ids by the GTFS service date they run on — take it from each plan leg's `serviceDate`.
     let tripIds = ["T-1", "T-2"]
+    let serviceDate = "20260101"
     while !Task.isCancelled {
-        switch try await client.realtime.delays(tripIds) {
+        switch try await client.realtime.delays(tripIds, serviceDate: serviceDate) {
         case .success(let delays):
             updateBoard(delays)
         case .failure(let error):
@@ -45,7 +47,7 @@ func poll(client: SpiderClient) async throws {
 /// The same loop, but using the SDK's built-in change-detecting stream (yields only when the data changes).
 func pollHelper(client: SpiderClient) async throws {
     // [START pollHelper]
-    for try await update in client.realtime.pollDelays(["T-1", "T-2"], intervalMs: 15_000) {
+    for try await update in client.realtime.pollDelays(["T-1", "T-2"], serviceDate: "20260101", intervalMs: 15_000) {
         if case .success(let delays) = update {
             updateBoard(delays)
         }
@@ -82,12 +84,15 @@ func vehicleForTrip(client: SpiderClient, tripId: String) async throws {
 /// Live schedule deviation for a set of trips, printed in minutes.
 func delays(client: SpiderClient) async throws {
     // [START delays]
-    let result = try await client.realtime.delays(["T-1", "T-2"])
+    // Delays are per trip instance — pass the GTFS service date (`YYYYMMDD`) the trips run on.
+    let result = try await client.realtime.delays(["T-1", "T-2"], serviceDate: "20260101")
     if case .success(let trips) = result {
-        for delay in trips.delays {
-            let minutes = (delay.delaySeconds ?? 0) / 60
-            let sign = minutes >= 0 ? "+" : ""
-            print("\(delay.tripId ?? "?"): \(sign)\(minutes) min")
+        for group in trips.groups {
+            for delay in group.delays {
+                let minutes = (delay.delaySeconds ?? 0) / 60
+                let sign = minutes >= 0 ? "+" : ""
+                print("\(delay.tripId ?? "?"): \(sign)\(minutes) min")
+            }
         }
     }
     // [END delays]

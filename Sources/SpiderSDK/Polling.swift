@@ -17,9 +17,14 @@ extension SpiderRealtime {
         poll(intervalMs: intervalMs) { try await self.vehicleForTrip(tripId) }
     }
 
-    /// Polls `delays(_:)`.
-    public func pollDelays(_ tripIds: [String], intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<TripDelays>, Error> {
-        poll(intervalMs: intervalMs) { try await self.delays(tripIds) }
+    /// Polls `delays(byServiceDate:)`.
+    public func pollDelays(byServiceDate: [String: [String]], intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<TripDelays>, Error> {
+        poll(intervalMs: intervalMs) { try await self.delays(byServiceDate: byServiceDate) }
+    }
+
+    /// Polls `delays(_:serviceDate:)` for a set of trips all on one service date (`YYYYMMDD`).
+    public func pollDelays(_ tripIds: [String], serviceDate: String, intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<TripDelays>, Error> {
+        poll(intervalMs: intervalMs) { try await self.delays(tripIds, serviceDate: serviceDate) }
     }
 
     /// Polls `alerts()`.

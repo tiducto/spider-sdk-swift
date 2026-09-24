@@ -8,8 +8,21 @@ public struct Leg: Sendable, Equatable {
     public let mode: TransitMode?
     public let startScheduled: String
     public let endScheduled: String
+    // Realtime-estimated start/end times (ISO-8601) and the schedule deviation in seconds (positive = late,
+    // negative = early), present when the trip is tracked. `isRealtime` is true when this leg carries live
+    // data; `serviceDate` is the GTFS service date (`YYYYMMDD`) the trip runs on — pass it to
+    // `SpiderRealtime.delays`, don't derive one from a clock time (GTFS times can exceed 24:00).
+    public let startEstimated: String?
+    public let endEstimated: String?
+    public let startDelaySeconds: Int?
+    public let endDelaySeconds: Int?
+    public let isRealtime: Bool
+    public let realtimeState: RealtimeState?
+    public let serviceDate: String?
     public let fromName: String?
     public let toName: String?
+    public let fromGtfsId: String?
+    public let toGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
     public let headsign: String?
@@ -249,6 +262,35 @@ public final class SpiderRouting {
         streamFrom(prev, direction: .backward, targetResults: targetResults, maxTraversalMinutes: maxTraversalMinutes)
     }
 
+    /// Streams itineraries over Server-Sent Events as the router sweeps the search window forward, emitting
+    /// them as they finalize instead of one batched page. Cold and cancellable: iterating starts the request,
+    /// cancelling the consuming task stops the sweep. Each `.chunk` carries itineraries with realtime delays
+    /// already applied to their legs; a `.page` then carries the continuation cursors and a `.done` closes the
+    /// stream (or a terminal `.failure`, which is yielded — never thrown).
+    ///
+    /// `targetResults` is a soft floor the sweep aims to reach; `maxWindowMinutes` caps how far forward it
+    /// searches. To continue, re-call with the same `options` plus `after` = the last `RoutePageInfo.endCursor`
+    /// (or `before` = `startCursor` to walk earlier). `options.searchWindowMinutes` is ignored — the stream
+    /// paces itself. For a single batched page instead, use `plan`.
+    public func planStream(
+        _ options: PlanOptions,
+        targetResults: Int = 5,
+        maxWindowMinutes: Int = 360,
+        after: String? = nil,
+        before: String? = nil
+    ) -> AsyncStream<PlanStreamEvent> {
+        AsyncStream { continuation in
+            let task = Task {
+                await self.runPlanStream(
+                    options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes,
+                    after: after, before: before, into: continuation
+                )
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     /// Departures from a stop, soonest first. `numberOfDepartures` caps the count; `startTime` defaults to now.
     public func departures(
         _ stopId: String,
@@ -401,6 +443,84 @@ public final class SpiderRouting {
             i += 1
         }
     }
+
+    // Runs the SSE `plan-stream` request and pumps parsed events into the continuation. Uses
+    // `URLSession.shared.bytes`, whose connection pool the default HTTP client (`.shared`) shares — so the
+    // stream rides the same pool as the batch calls. No contract-version check here (`/routing/plan-stream`
+    // is a streamed surface); every failure — a non-2xx response, a server `error` event, or a decode slip —
+    // becomes a terminal `.failure` event, never a throw. A cancelled task stops the sweep quietly.
+    private func runPlanStream(
+        _ options: PlanOptions,
+        targetResults: Int,
+        maxWindowMinutes: Int,
+        after: String?,
+        before: String?,
+        into continuation: AsyncStream<PlanStreamEvent>.Continuation
+    ) async {
+        let request = makeRequest(options)
+        let iso = planIsoFormatter.string(from: request.time)
+        let dateTime = request.timeKind == .departAt
+            ? PlanDateTimeInput(earliestDeparture: iso)
+            : PlanDateTimeInput(latestArrival: iso)
+        let variables = PlanConnectionStreamVariables(
+            dateTime: dateTime,
+            origin: locationToInput(request.origin),
+            destination: locationToInput(request.destination),
+            via: request.via.isEmpty ? nil : request.via.map(viaToInput),
+            modes: modesInput(request.allowedTransitModes),
+            preferences: preferencesInput(request),
+            targetResults: targetResults,
+            maxWindow: "PT\(max(1, maxWindowMinutes))M",
+            before: before,
+            after: after
+        )
+
+        let urlRequest: URLRequest
+        do {
+            urlRequest = try transport.streamingRequest(PersistedQueries.planstream, variables)
+        } catch {
+            continuation.yield(.failure(toSpiderError(error)))
+            return
+        }
+
+        do {
+            let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                continuation.yield(.failure(toSpiderError(
+                    TransportError(.http, "routing plan-stream -> \(http.statusCode)", httpStatus: http.statusCode)
+                )))
+                return
+            }
+            var eventName: String?
+            var dataLines: [String] = []
+            func flush() {
+                defer { eventName = nil; dataLines = [] }
+                guard !dataLines.isEmpty else { return }
+                if let event = parsePlanStreamRecord(event: eventName ?? SSE_DEFAULT_EVENT, data: dataLines.joined(separator: "\n")) {
+                    continuation.yield(event)
+                }
+            }
+            for try await line in bytes.lines {
+                if line.isEmpty { flush(); continue }
+                if line.hasPrefix(":") { continue } // comment / heartbeat
+                guard let colon = line.firstIndex(of: ":") else { continue }
+                let field = String(line[..<colon])
+                var value = String(line[line.index(after: colon)...])
+                if value.hasPrefix(" ") { value.removeFirst() }
+                switch field {
+                case "event": eventName = value
+                case "data": dataLines.append(value)
+                default: break // id / retry ignored
+                }
+            }
+            flush() // a trailing record with no terminating blank line
+        } catch is CancellationError {
+            // Cancelled — stop quietly, matching the batch stream helpers.
+        } catch {
+            if (error as? URLError)?.code == .cancelled { return }
+            continuation.yield(.failure(toSpiderError(error)))
+        }
+    }
 }
 
 // MARK: - request builders
@@ -464,13 +584,25 @@ private func mapItinerary(_ w: SpiderContract.Itinerary) -> Itinerary {
     )
 }
 
+// Shared wire→domain leg mapping, used by both the batch plan and the SSE stream (a stream chunk's
+// itineraries are the same wire nodes as `planConnection.edges[].node`). Realtime delays ride here: each
+// leg's estimated time + delay and its realtime state come straight off the wire node.
 private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
     Leg(
         mode: TransitMode.fromWire(w.mode?.rawValue),
         startScheduled: w.start.scheduledTime,
         endScheduled: w.end.scheduledTime,
+        startEstimated: w.start.estimated?.time,
+        endEstimated: w.end.estimated?.time,
+        startDelaySeconds: parseDelaySeconds(w.start.estimated?.delay),
+        endDelaySeconds: parseDelaySeconds(w.end.estimated?.delay),
+        isRealtime: w.realTime ?? false,
+        realtimeState: RealtimeState.fromWire(w.realtimeState?.rawValue),
+        serviceDate: w.serviceDate,
         fromName: w.from.name,
         toName: w.to.name,
+        fromGtfsId: w.from.stop?.gtfsId,
+        toGtfsId: w.to.stop?.gtfsId,
         routeShortName: w.route?.shortName,
         routeLongName: w.route?.longName,
         headsign: w.headsign,
@@ -483,6 +615,34 @@ private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
         toWheelchair: WheelchairBoarding.fromWire(w.to.stop?.wheelchairBoarding?.rawValue),
         geometry: w.legGeometry?.points.map(decodePolyline) ?? []
     )
+}
+
+// Parses a wire delay — an ISO-8601 duration ("PT60S", "PT1M30S", "-PT30S") or a bare integer of seconds —
+// to whole seconds (positive = late, negative = early). Blank or unparseable input maps to nil.
+func parseDelaySeconds(_ raw: String?) -> Int? {
+    guard var s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
+    if let seconds = Int(s) { return seconds }
+    var sign = 1
+    if s.hasPrefix("-") { sign = -1; s.removeFirst() } else if s.hasPrefix("+") { s.removeFirst() }
+    guard s.hasPrefix("PT") else { return nil }
+    s.removeFirst(2)
+    var total = 0.0
+    var number = ""
+    var sawUnit = false
+    for ch in s {
+        if ch.isNumber || ch == "." { number.append(ch); continue }
+        guard let value = Double(number) else { return nil }
+        switch ch {
+        case "H", "h": total += value * 3600
+        case "M", "m": total += value * 60
+        case "S", "s": total += value
+        default: return nil
+        }
+        number = ""
+        sawUnit = true
+    }
+    if !number.isEmpty || !sawUnit { return nil }
+    return sign * Int(total.rounded())
 }
 
 private func mapDepartures(_ stop: StopDeparturesStop) -> [Departure] {
@@ -549,4 +709,116 @@ private func clampSeconds(_ seconds: Int) -> Int {
 // Each cursor step advances a full (fixed) search window, so steps to cover the total time is a plain division.
 private func stepCount(_ maxTraversalMinutes: Int, _ stepMinutes: Int) -> Int {
     max(1, maxTraversalMinutes / max(1, stepMinutes))
+}
+
+// MARK: - SSE plan-stream parsing
+
+// The SSE event name a record defaults to when the server sends only `data:` lines.
+private let SSE_DEFAULT_EVENT = "message"
+
+private struct StreamChunkData: Decodable {
+    let frontier: Int?
+    let found: Int?
+    let finalized: Int?
+    let results: [SpiderContract.Itinerary]?
+}
+
+private struct StreamPageInfoData: Decodable {
+    let startCursor: String?
+    let endCursor: String?
+    let hasNextPage: Bool?
+    let hasPreviousPage: Bool?
+    let searchWindowUsed: String?
+}
+
+private struct StreamDoneData: Decodable {
+    let iterations: Int?
+    let windowSeconds: Int?
+    let resultCount: Int?
+    let stoppedBy: String?
+}
+
+private struct StreamErrorData: Decodable {
+    let errors: [StreamGraphQLError]?
+    let message: String?
+}
+
+private struct StreamGraphQLError: Decodable {
+    let message: String?
+    let extensions: StreamGraphQLErrorExtensions?
+}
+
+private struct StreamGraphQLErrorExtensions: Decodable {
+    let code: String?
+    let field: String?
+}
+
+// Parses one finished SSE record (event name + accumulated data) into a `PlanStreamEvent`; returns nil for
+// records the SDK doesn't surface (heartbeats, unknown events, blank data). A malformed payload becomes a
+// terminal `.failure` rather than tearing the stream down. `internal` so the wire-contract test drives it.
+func parsePlanStreamRecord(event: String, data: String) -> PlanStreamEvent? {
+    guard !data.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+    let bytes = Data(data.utf8)
+    let decoder = JSONDecoder()
+    switch event {
+    case "chunk":
+        do {
+            let chunk = try decoder.decode(StreamChunkData.self, from: bytes)
+            return .chunk(
+                frontierSeconds: chunk.frontier ?? 0,
+                found: chunk.found ?? 0,
+                finalized: chunk.finalized ?? 0,
+                itineraries: (chunk.results ?? []).map(mapItinerary)
+            )
+        } catch {
+            return .failure(toSpiderError(SpiderDecodingError(message: "failed to decode plan-stream chunk", cause: error)))
+        }
+    case "pageInfo":
+        do {
+            let page = try decoder.decode(StreamPageInfoData.self, from: bytes)
+            return .page(RoutePageInfo(
+                startCursor: page.startCursor,
+                endCursor: page.endCursor,
+                hasNextPage: page.hasNextPage ?? false,
+                hasPreviousPage: page.hasPreviousPage ?? false,
+                searchWindowUsed: page.searchWindowUsed
+            ))
+        } catch {
+            return .failure(toSpiderError(SpiderDecodingError(message: "failed to decode plan-stream pageInfo", cause: error)))
+        }
+    case "done":
+        do {
+            let done = try decoder.decode(StreamDoneData.self, from: bytes)
+            return .done(
+                iterations: done.iterations ?? 0,
+                windowSeconds: done.windowSeconds ?? 0,
+                resultCount: done.resultCount ?? 0,
+                stoppedBy: done.stoppedBy ?? "unknown"
+            )
+        } catch {
+            return .failure(toSpiderError(SpiderDecodingError(message: "failed to decode plan-stream done", cause: error)))
+        }
+    case "error":
+        return .failure(streamErrorToSpiderError(data))
+    default:
+        return nil
+    }
+}
+
+// A stream `error` record is the same GraphQL error envelope the batch path returns, so it maps through the
+// same taxonomy — a top-level BAD_REQUEST becomes a typed `.badRequest` (with its field), anything else server.
+private func streamErrorToSpiderError(_ data: String) -> SpiderError {
+    if let payload = try? JSONDecoder().decode(StreamErrorData.self, from: Data(data.utf8)) {
+        if let errors = payload.errors, !errors.isEmpty {
+            if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
+                return toSpiderError(TransportError(.badRequest, bad.message ?? "", field: bad.extensions?.field))
+            }
+            let joined = errors.compactMap { $0.message }.joined(separator: ", ")
+            return toSpiderError(TransportError(.upstream, "routing plan-stream errors: \(joined)"))
+        }
+        if let message = payload.message {
+            return toSpiderError(TransportError(.upstream, "plan-stream error: \(message)"))
+        }
+    }
+    return toSpiderError(TransportError(.upstream, "plan-stream error: \(String(data.prefix(300)))"))
 }

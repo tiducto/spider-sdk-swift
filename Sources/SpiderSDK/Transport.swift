@@ -133,6 +133,21 @@ final class Transport {
         return payload
     }
 
+    // MARK: SSE (persisted-query stream)
+
+    // Builds the persisted-query POST request for an SSE stream: the same `{id, variables}` body and identity
+    // headers a batch call carries, plus `accept: text/event-stream`. The caller drives it with
+    // `URLSession.bytes`; the response is streamed, not buffered, so it never runs through `send`/retry.
+    func streamingRequest<V: Encodable>(_ op: PersistedOp, _ variables: V) throws -> URLRequest {
+        guard let url = URL(string: "\(baseURL)/routing/\(op.path)") else {
+            throw TransportError(.upstream, "invalid URL for routing/\(op.path)")
+        }
+        let body = try JSONEncoder().encode(PersistedRequest(id: op.id, variables: variables))
+        var req = request(url: url, method: "POST", body: body, json: true)
+        req.setValue("text/event-stream", forHTTPHeaderField: "accept")
+        return req
+    }
+
     // MARK: REST
 
     func postJson<B: Encodable, D: Decodable>(_ path: String, _ body: B, errorMessage: ((String) -> String)? = nil, as: D.Type = D.self) async throws -> D {
