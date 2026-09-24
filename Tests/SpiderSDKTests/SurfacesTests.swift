@@ -69,15 +69,38 @@ final class RealtimeTests: XCTestCase {
         XCTAssertNil(update.vehicle)
     }
 
-    func testDelaysAndAlertsMap() async throws {
+    func testDelaysGroupByServiceDateAndPostGroupedRequest() async throws {
         let delaysBody = """
-        {"delays":[{"tripId":"T1","routeId":"R1","delaySeconds":120,"scheduleRelationship":"SCHEDULED","stopTimeUpdates":[{"stopId":"S1","arrivalDelay":60,"departureDelay":90}]}],"missing":[],"feedTimestamp":1700000000,"staleSeconds":1.0}
+        {"results":[{"serviceDate":"20260101","delays":[{"tripId":"T1","routeId":"R1","delaySeconds":120,"scheduleRelationship":"SCHEDULED","stopTimeUpdates":[{"stopId":"S1","arrivalDelay":60,"departureDelay":90}]}],"missing":["T2"]}],"feedTimestamp":1700000000,"staleSeconds":1.0}
         """
-        let (client, _) = makeClient { _ in json(delaysBody) }
-        let result = try await client.realtime.delays(["T1"])
+        let (client, mock) = makeClient { _ in json(delaysBody) }
+        let result = try await client.realtime.delays(["T1", "T2"], serviceDate: "20260101")
         guard case .success(let delays) = result else { return XCTFail("expected success") }
-        XCTAssertEqual(delays.delays[0].delaySeconds, 120) // seconds NOT converted
-        XCTAssertEqual(delays.delays[0].stopTimeUpdates[0].arrivalDelay, 60)
+
+        // Grouped domain + per-instance lookup.
+        XCTAssertEqual(delays.groups.count, 1)
+        XCTAssertEqual(delays.groups[0].serviceDate, "20260101")
+        XCTAssertEqual(delays.groups[0].missing, ["T2"])
+        let delay = delays.delayFor(tripId: "T1", serviceDate: "20260101")
+        XCTAssertEqual(delay?.delaySeconds, 120) // seconds NOT converted
+        XCTAssertEqual(delay?.stopTimeUpdates[0].arrivalDelay, 60)
+        XCTAssertNil(delays.delayFor(tripId: "T1", serviceDate: "20260102")) // wrong instance → nil
+
+        // Grouped POST request body (was a flat GET before contract v0.5).
+        let req = mock.requests[0]
+        XCTAssertEqual(req.path, "/realtime/delays")
+        XCTAssertEqual(req.httpMethod, "POST")
+        let queries = req.bodyJSON["queries"] as! [[String: Any]]
+        XCTAssertEqual(queries[0]["serviceDate"] as? String, "20260101")
+        XCTAssertEqual(queries[0]["tripIds"] as? [String], ["T1", "T2"])
+    }
+
+    func testDelaysEmptyInputShortCircuitsWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        let result = try await client.realtime.delays([], serviceDate: "20260101")
+        guard case .success(let delays) = result else { return XCTFail("expected success") }
+        XCTAssertTrue(delays.groups.isEmpty)
+        XCTAssertTrue(mock.requests.isEmpty) // no network call
     }
 }
 
@@ -109,6 +132,6 @@ final class EnumsAndPolylineTests: XCTestCase {
 
     func testClientExposesContractVersion() {
         let (client, _) = makeClient { _ in json("{}") }
-        XCTAssertEqual(client.contractVersion, "0.5")
+        XCTAssertEqual(client.contractVersion, "0.7")
     }
 }

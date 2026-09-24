@@ -17,7 +17,10 @@ let package = Package(
     targets: [
         .target(name: "SpiderContract"),
         .target(name: "SpiderSDK", dependencies: ["SpiderContract"]),
-        .testTarget(name: "SpiderSDKTests", dependencies: ["SpiderSDK"]),
+        // SpiderContract is a test dependency too so the wire-shape tests can pin the generated DTOs directly
+        // (the access the Kotlin SDK's contract tests get from being in-module). It stays out of the SpiderSDK
+        // product, so downstream packages still cannot import the wire models.
+        .testTarget(name: "SpiderSDKTests", dependencies: ["SpiderSDK", "SpiderContract"]),
         // Region-tagged example programs the docs site inlines as code samples. Not a package product
         // (internal, like the tests); it exists only to keep the samples compiling against the real API.
         .executableTarget(name: "spider-sdk-examples", dependencies: ["SpiderSDK"], path: "Sources/Examples"),

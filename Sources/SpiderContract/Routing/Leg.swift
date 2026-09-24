@@ -6,6 +6,7 @@ public struct Leg: Codable, Sendable {
     public let mode: Mode?
     public let realtimeState: RealtimeState?
     public let realTime: Bool?
+    public let serviceDate: String?
     public let route: Route?
     public let headsign: String?
     public let distance: Double?
@@ -22,6 +23,7 @@ public struct Leg: Codable, Sendable {
         mode: Mode? = nil,
         realtimeState: RealtimeState? = nil,
         realTime: Bool? = nil,
+        serviceDate: String? = nil,
         route: Route? = nil,
         headsign: String? = nil,
         distance: Double? = nil,
@@ -37,6 +39,7 @@ public struct Leg: Codable, Sendable {
         self.mode = mode
         self.realtimeState = realtimeState
         self.realTime = realTime
+        self.serviceDate = serviceDate
         self.route = route
         self.headsign = headsign
         self.distance = distance

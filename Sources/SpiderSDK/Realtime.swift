@@ -55,11 +55,24 @@ public struct TripDelay: Sendable, Equatable {
     public let stopTimeUpdates: [StopTimeUpdate]
 }
 
-/// Live deviations for a set of trips, plus the trip ids with no live delay.
-public struct TripDelays: Sendable, Equatable {
+/// Delays for one GTFS service date: those the feed reported, and the `missing` trip ids it didn't. The same
+/// `tripId` on two dates is two distinct instances, so `missing` is per group, not global.
+public struct ServiceDateDelays: Sendable, Equatable {
+    public let serviceDate: String
     public let delays: [TripDelay]
     public let missing: [String]
+}
+
+/// Result of `SpiderRealtime.delays`: delays grouped by service date, plus feed freshness. Look up a single
+/// instance with `delayFor(tripId:serviceDate:)`.
+public struct TripDelays: Sendable, Equatable {
+    public let groups: [ServiceDateDelays]
     public let freshness: FeedFreshness
+
+    /// The delay for the (`tripId`, `serviceDate`) instance, if the feed reported one.
+    public func delayFor(tripId: String, serviceDate: String) -> TripDelay? {
+        groups.first { $0.serviceDate == serviceDate }?.delays.first { $0.tripId == tripId }
+    }
 }
 
 /// A time window an alert is active for. Epoch milliseconds.
@@ -98,7 +111,7 @@ public struct ServiceAlerts: Sendable, Equatable {
 
 private let EMPTY_FRESHNESS = FeedFreshness(feedTimestampEpochMs: nil, staleSeconds: nil)
 private let EMPTY_POSITIONS = VehiclePositions(vehicles: [], missing: [], freshness: EMPTY_FRESHNESS)
-private let EMPTY_DELAYS = TripDelays(delays: [], missing: [], freshness: EMPTY_FRESHNESS)
+private let EMPTY_DELAYS = TripDelays(groups: [], freshness: EMPTY_FRESHNESS)
 
 /// The realtime surface: live vehicle positions, schedule deviations, and service alerts. Poll-based —
 /// see the `poll*` methods for change-detecting streams.
@@ -151,14 +164,15 @@ public final class SpiderRealtime {
         }
     }
 
-    /// Live schedule deviation for the given trips. An empty input returns an empty result without a request.
-    public func delays(_ tripIds: [String]) async throws -> SpiderResult<TripDelays> {
-        guard !tripIds.isEmpty else { return .success(EMPTY_DELAYS) }
+    /// Live delays, resolved per `(tripId, serviceDate)` instance: group trip ids by the GTFS service date
+    /// (`YYYYMMDD`) they run on — pass each leg's `serviceDate` through. An all-empty input skips the request.
+    public func delays(byServiceDate: [String: [String]]) async throws -> SpiderResult<TripDelays> {
+        guard byServiceDate.contains(where: { !$0.value.isEmpty }) else { return .success(EMPTY_DELAYS) }
         do {
-            let dto: DelaysResponse = try await transport.getJson("/realtime/delays", query: [("tripIds", tripIds.joined(separator: ","))])
+            let body = DelaysRequest(queries: byServiceDate.map { DelayQuery(serviceDate: $0.key, tripIds: $0.value) })
+            let dto: DelaysResponse = try await transport.postJson("/realtime/delays", body)
             let delays = TripDelays(
-                delays: (dto.delays ?? []).map(mapDelay),
-                missing: dto.missing ?? [],
+                groups: (dto.results ?? []).map(mapDelayGroup),
                 freshness: mapFreshness(dto.feedTimestamp, dto.staleSeconds)
             )
             return .success(delays)
@@ -167,6 +181,11 @@ public final class SpiderRealtime {
         } catch {
             return .failure(toSpiderError(error))
         }
+    }
+
+    /// Live delays for `tripIds` all on one `serviceDate` (`YYYYMMDD`) — the common single-day case.
+    public func delays(_ tripIds: [String], serviceDate: String) async throws -> SpiderResult<TripDelays> {
+        try await delays(byServiceDate: [serviceDate: tripIds])
     }
 
     /// All active service alerts for the environment.
@@ -205,6 +224,14 @@ private func mapVehicle(_ v: VehicleDto) -> LiveVehicle {
         stopId: v.stopId, currentStatus: v.currentStatus,
         occupancy: OccupancyStatus.fromWire(v.occupancyStatus),
         timestampEpochMs: secondsToMs(v.timestamp)
+    )
+}
+
+private func mapDelayGroup(_ g: DelayGroupResult) -> ServiceDateDelays {
+    ServiceDateDelays(
+        serviceDate: g.serviceDate,
+        delays: (g.delays ?? []).map(mapDelay),
+        missing: g.missing ?? []
     )
 }
 
@@ -279,9 +306,24 @@ private struct DelayDto: Decodable {
     let stopTimeUpdates: [StopTimeUpdateDto]?
 }
 
-private struct DelaysResponse: Decodable {
+// Grouped, service-date-scoped request body for POST /realtime/delays.
+private struct DelayQuery: Encodable {
+    let serviceDate: String
+    let tripIds: [String]
+}
+
+private struct DelaysRequest: Encodable {
+    let queries: [DelayQuery]
+}
+
+private struct DelayGroupResult: Decodable {
+    let serviceDate: String
     let delays: [DelayDto]?
     let missing: [String]?
+}
+
+private struct DelaysResponse: Decodable {
+    let results: [DelayGroupResult]?
     let feedTimestamp: Int?
     let staleSeconds: Double?
 }
