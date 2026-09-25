@@ -159,6 +159,35 @@ func streamMoreItineraries(client: SpiderClient) async throws {
     // [END streamMoreItineraries]
 }
 
+func streamEarlierItineraries(client: SpiderClient) async throws {
+    // [START streamEarlierItineraries]
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        departAt: Date()
+    )
+
+    // Stream the first window, keeping the terminal page to page backwards from.
+    var pageInfo: RoutePageInfo?
+    for await event in client.routing.planStream(options, targetResults: 5) {
+        if case .done(let info) = event {
+            pageInfo = info
+        }
+    }
+
+    // Page backward only when the terminal page says there is an earlier window, using its startCursor.
+    if let pageInfo, pageInfo.hasPreviousPage, let cursor = pageInfo.startCursor {
+        for await event in client.routing.planStreamPrevious(options, targetResults: 5, before: cursor) {
+            if case .result(let itineraries) = event {
+                for itinerary in itineraries {
+                    print("earlier: \(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                }
+            }
+        }
+    }
+    // [END streamEarlierItineraries]
+}
+
 /// Look up a single trip's timetable.
 func tripLookup(client: SpiderClient) async throws {
     // [START tripLookup]
