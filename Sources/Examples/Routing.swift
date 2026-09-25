@@ -115,7 +115,6 @@ func streamItineraries(client: SpiderClient) async throws {
     )
 
     // planStream emits `.result` batches as itineraries finalize, then a terminal `.done` (or `.failure`).
-    var pageInfo: RoutePageInfo?
     for await event in client.routing.planStream(options, targetResults: 5) {
         switch event {
         case .result(let itineraries):
@@ -123,9 +122,27 @@ func streamItineraries(client: SpiderClient) async throws {
                 print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?"), \(itinerary.numberOfTransfers) transfers")
             }
         case .done(let info):
-            pageInfo = info // cursors + hasNextPage/hasPreviousPage for the continuation
+            print("done · more later: \(info.hasNextPage)")
         case .failure(let error):
             print("stream failed: \(error.message)")
+        }
+    }
+    // [END streamItineraries]
+}
+
+func streamMoreItineraries(client: SpiderClient) async throws {
+    // [START streamMoreItineraries]
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        departAt: Date()
+    )
+
+    // Stream the first window, keeping the terminal page to continue from.
+    var pageInfo: RoutePageInfo?
+    for await event in client.routing.planStream(options, targetResults: 5) {
+        if case .done(let info) = event {
+            pageInfo = info
         }
     }
 
@@ -133,11 +150,13 @@ func streamItineraries(client: SpiderClient) async throws {
     if let pageInfo, pageInfo.hasNextPage, let cursor = pageInfo.endCursor {
         for await event in client.routing.planStreamNext(options, targetResults: 5, after: cursor) {
             if case .result(let itineraries) = event {
-                print("+\(itineraries.count) later itineraries")
+                for itinerary in itineraries {
+                    print("later: \(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                }
             }
         }
     }
-    // [END streamItineraries]
+    // [END streamMoreItineraries]
 }
 
 /// Look up a single trip's timetable.
