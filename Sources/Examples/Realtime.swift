@@ -44,12 +44,14 @@ func poll(client: SpiderClient) async throws {
     // [END poll]
 }
 
-/// The same loop, but using the SDK's built-in change-detecting stream (yields only when the data changes).
+/// A change-detecting stream of vehicle positions via the SDK's built-in polling helper (yields only when the data changes).
 func pollHelper(client: SpiderClient) async throws {
     // [START pollHelper]
-    for try await update in client.realtime.pollDelays(["T-1", "T-2"], serviceDate: "20260101", intervalMs: 15_000) {
-        if case .success(let delays) = update {
-            updateBoard(delays)
+    for try await update in client.realtime.pollVehicles(["T-1", "T-2"], intervalMs: 15_000) {
+        if case .success(let positions) = update {
+            for vehicle in positions.vehicles {
+                placeMarker(lat: vehicle.latitude ?? 0, lon: vehicle.longitude ?? 0)
+            }
         }
     }
     // [END pollHelper]
