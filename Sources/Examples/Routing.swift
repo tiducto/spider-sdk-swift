@@ -302,6 +302,152 @@ func planWithOptions(client: SpiderClient) async throws {
     // [END planWithOptions]
 }
 
+/// Stream a plan for a specific departure time instead of "now".
+func streamForTime(client: SpiderClient) async throws {
+    // [START streamForTime]
+    let inOneHour = Date().addingTimeInterval(60 * 60)
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        departAt: inOneHour
+    )
+
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
+        switch event {
+        case .result(let itineraries):
+            for itinerary in itineraries {
+                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+            }
+        case .done:
+            break
+        case .failure(let error):
+            print("stream failed: \(error.message)")
+        }
+    }
+    // [END streamForTime]
+}
+
+/// Stream a plan that must arrive by a deadline instead of departing now.
+func streamArriveBy(client: SpiderClient) async throws {
+    // [START streamArriveBy]
+    let deadline = Date().addingTimeInterval(2 * 60 * 60) // arrive within two hours
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        arriveBy: deadline
+    )
+
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
+        switch event {
+        case .result(let itineraries):
+            for itinerary in itineraries {
+                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+            }
+        case .done:
+            break
+        case .failure(let error):
+            print("stream failed: \(error.message)")
+        }
+    }
+    // [END streamArriveBy]
+}
+
+/// Stream a plan restricted to specific transit modes (here tram + subway only).
+func streamWithModes(client: SpiderClient) async throws {
+    // [START streamWithModes]
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        allowedTransitModes: [.tram, .subway]
+    )
+
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
+        switch event {
+        case .result(let itineraries):
+            for itinerary in itineraries {
+                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+            }
+        case .done:
+            break
+        case .failure(let error):
+            print("stream failed: \(error.message)")
+        }
+    }
+    // [END streamWithModes]
+}
+
+/// Stream a plan that must pass through a via point, dwelling at least five minutes there.
+func streamVia(client: SpiderClient) async throws {
+    // [START streamVia]
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        via: [.visit(.coordinate(49.2002, 16.6110), minimumWaitSeconds: 300)]
+    )
+
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
+        switch event {
+        case .result(let itineraries):
+            for itinerary in itineraries {
+                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+            }
+        case .done:
+            break
+        case .failure(let error):
+            print("stream failed: \(error.message)")
+        }
+    }
+    // [END streamVia]
+}
+
+/// Stream a wheelchair-accessible plan.
+func streamWheelchair(client: SpiderClient) async throws {
+    // [START streamWheelchair]
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        wheelchairAccessible: true
+    )
+
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
+        switch event {
+        case .result(let itineraries):
+            for itinerary in itineraries {
+                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+            }
+        case .done:
+            break
+        case .failure(let error):
+            print("stream failed: \(error.message)")
+        }
+    }
+    // [END streamWheelchair]
+}
+
+/// Stream a plan with a transfer cap.
+func streamWithLimits(client: SpiderClient) async throws {
+    // [START streamWithLimits]
+    let options = PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        maxTransfers: 2
+    )
+
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
+        switch event {
+        case .result(let itineraries):
+            for itinerary in itineraries {
+                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+            }
+        case .done:
+            break
+        case .failure(let error):
+            print("stream failed: \(error.message)")
+        }
+    }
+    // [END streamWithLimits]
+}
+
 /// Branch on the stable `SpiderError.code` taxonomy for programmatic error handling.
 func handleRoutingErrors(client: SpiderClient) async throws {
     // [START handleErrors]
