@@ -177,8 +177,6 @@ struct PlanRequest: Sendable, Equatable {
     let wheelchairAccessible: Bool
 }
 
-// Public methods inline these as literal default arguments (10 / 360) — public default args cannot
-// reference non-public symbols. Keep the literals below in sync with these names if you change them.
 private let DEFAULT_SEARCH_WINDOW_MINUTES = 60
 private let DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60
 private let ROUTING_INT_MAX = 2_147_483_647
