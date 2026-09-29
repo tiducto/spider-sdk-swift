@@ -21,7 +21,8 @@ public struct SpiderError: Error {
     public let message: String
     /// The HTTP status, when the failure came from an HTTP response.
     public let httpStatus: Int?
-    /// The machine-readable `code` from a server JSON error envelope, when present.
+    /// The machine-readable `code` from a server JSON error envelope, when present. `persisted_query_rejected`
+    /// (with `httpStatus` 403) means this SDK version calls a query the API no longer serves: update the SDK.
     public let serverCode: String?
     /// For a `badRequest` (a server validation failure — over-cap `searchWindow`, malformed `via`, or a
     /// missing required field), the offending input field when the server names one. Nil otherwise.
@@ -41,23 +42,6 @@ public struct SpiderError: Error {
 
 extension SpiderError: CustomStringConvertible {
     public var description: String { "SpiderError(\(code.rawValue): \(message))" }
-}
-
-/// Thrown (never returned) when the gateway declares a different MAJOR contract version than this SDK speaks.
-/// It escapes the `SpiderResult` channel on purpose: a major mismatch is a hard, programmer-visible failure.
-public struct SpiderContractMismatchError: Error, CustomStringConvertible {
-    public let expected: String
-    public let actual: String
-
-    public init(expected: String, actual: String) {
-        self.expected = expected
-        self.actual = actual
-    }
-
-    public var message: String {
-        "Spider contract mismatch: this SDK speaks \(expected) but the gateway declared \(actual)"
-    }
-    public var description: String { message }
 }
 
 // MARK: - Internal transport errors (mapped to SpiderError by `toSpiderError`)
@@ -92,17 +76,38 @@ struct SpiderDecodingError: Error {
 }
 
 /// A parsed server error envelope: a stable machine `code` and a human `message`, either possibly absent.
+/// `error` is the gateway's own rejection kind (e.g. `persisted_query_rejected`), which it sends instead of `code`.
 struct ErrorEnvelope {
     let code: String?
     let message: String?
+    let error: String?
 }
 
 func parseErrorEnvelope(_ text: String) -> ErrorEnvelope {
     guard let data = text.data(using: .utf8),
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        return ErrorEnvelope(code: nil, message: nil)
+        return ErrorEnvelope(code: nil, message: nil, error: nil)
     }
-    return ErrorEnvelope(code: obj["code"] as? String, message: obj["message"] as? String)
+    return ErrorEnvelope(code: obj["code"] as? String, message: obj["message"] as? String, error: obj["error"] as? String)
+}
+
+let PERSISTED_QUERY_REJECTED = "persisted_query_rejected"
+
+// A routing non-2xx as a transport error. A 403 `persisted_query_rejected` is the gateway refusing a query id
+// it no longer serves (retired after its deprecation window), so the message says to update the SDK rather
+// than pointing at the key.
+func routingHTTPError(_ path: String, status: Int, body: String) -> TransportError {
+    let env = parseErrorEnvelope(body)
+    if status == 403 && env.error == PERSISTED_QUERY_REJECTED {
+        return TransportError(
+            .http,
+            "routing \(path) -> 403: this SDK version calls a query the API no longer serves; update the SDK",
+            httpStatus: status,
+            serverCode: PERSISTED_QUERY_REJECTED
+        )
+    }
+    let detail = env.message ?? String(body.prefix(300))
+    return TransportError(.http, "routing \(path) -> \(status): \(detail)", httpStatus: status, serverCode: env.code)
 }
 
 /// Maps any thrown error into the public `SpiderError` taxonomy. Mirrors the TS SDK's `toSpiderError`.

@@ -4,14 +4,22 @@ import XCTest
 final class StopsTests: XCTestCase {
     func testSearchBuildsFilterExpressionWithEscapingAndMapsHits() async throws {
         let body = """
-        {"hits":[{"gtfsId":"S1","name":"Main","lat":49.1,"lon":16.6,"country":"CZ","city":"Brno"}],"query":"Main"}
+        {"hits":[{"gtfsId":"S1","name":"Main","code":"1234","locationType":1,"wheelchairBoarding":2,"lat":49.1,"lon":16.6,"country":"CZ","city":"Brno"},
+                 {"gtfsId":"S2","name":"Side","wheelchairBoarding":0}],"query":"Main"}
         """
         let (client, mock) = makeClient { _ in json(body) }
         let result = try await client.stops.search(StopFilter(name: "Main", country: "CZ", city: "Br\"no"))
         guard case .success(let stops) = result else { return XCTFail("expected success") }
-        XCTAssertEqual(stops.count, 1)
+        XCTAssertEqual(stops.count, 2)
         XCTAssertEqual(stops[0].gtfsId, "S1")
         XCTAssertEqual(stops[0].city, "Brno")
+        XCTAssertEqual(stops[0].code, "1234")
+        XCTAssertEqual(stops[0].locationType, 1)
+        XCTAssertEqual(stops[0].wheelchairBoarding, .notPossible)
+        // Absent fields stay nil; GTFS 0 (no information) maps to nil like routing's NO_INFORMATION.
+        XCTAssertNil(stops[1].code)
+        XCTAssertNil(stops[1].locationType)
+        XCTAssertNil(stops[1].wheelchairBoarding)
 
         let req = mock.requests[0]
         XCTAssertEqual(req.path, "/stops/search")
@@ -71,36 +79,47 @@ final class RealtimeTests: XCTestCase {
 
     func testDelaysGroupByServiceDateAndPostGroupedRequest() async throws {
         let delaysBody = """
-        {"results":[{"serviceDate":"20260101","delays":[{"tripId":"T1","routeId":"R1","delaySeconds":120,"scheduleRelationship":"SCHEDULED","stopTimeUpdates":[{"stopId":"S1","arrivalDelay":60,"departureDelay":90}]}],"missing":["T2"]}],"feedTimestamp":1700000000,"staleSeconds":1.0}
+        {"results":[{"serviceDate":"2026-01-01","delays":[{"tripId":"T1","routeId":"R1","delaySeconds":120,"scheduleRelationship":"SCHEDULED","stopTimeUpdates":[{"stopId":"S1","arrivalDelay":60,"departureDelay":90}]}],"missing":["T2"]}],"feedTimestamp":1700000000,"staleSeconds":1.0}
         """
         let (client, mock) = makeClient { _ in json(delaysBody) }
-        let result = try await client.realtime.delays(["T1", "T2"], serviceDate: "20260101")
+        let result = try await client.realtime.delays(["T1", "T2"], serviceDate: "2026-01-01")
         guard case .success(let delays) = result else { return XCTFail("expected success") }
 
         // Grouped domain + per-instance lookup.
         XCTAssertEqual(delays.groups.count, 1)
-        XCTAssertEqual(delays.groups[0].serviceDate, "20260101")
+        XCTAssertEqual(delays.groups[0].serviceDate, "2026-01-01")
         XCTAssertEqual(delays.groups[0].missing, ["T2"])
-        let delay = delays.delayFor(tripId: "T1", serviceDate: "20260101")
+        let delay = delays.delayFor(tripId: "T1", serviceDate: "2026-01-01")
         XCTAssertEqual(delay?.delaySeconds, 120) // seconds NOT converted
         XCTAssertEqual(delay?.stopTimeUpdates[0].arrivalDelay, 60)
-        XCTAssertNil(delays.delayFor(tripId: "T1", serviceDate: "20260102")) // wrong instance → nil
+        XCTAssertNil(delays.delayFor(tripId: "T1", serviceDate: "2026-01-02")) // wrong instance → nil
 
         // Grouped POST request body (was a flat GET before contract v0.5).
         let req = mock.requests[0]
         XCTAssertEqual(req.path, "/realtime/delays")
         XCTAssertEqual(req.httpMethod, "POST")
         let queries = req.bodyJSON["queries"] as! [[String: Any]]
-        XCTAssertEqual(queries[0]["serviceDate"] as? String, "20260101")
+        XCTAssertEqual(queries[0]["serviceDate"] as? String, "2026-01-01")
         XCTAssertEqual(queries[0]["tripIds"] as? [String], ["T1", "T2"])
     }
 
     func testDelaysEmptyInputShortCircuitsWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json("{}") }
-        let result = try await client.realtime.delays([], serviceDate: "20260101")
+        let result = try await client.realtime.delays([], serviceDate: "2026-01-01")
         guard case .success(let delays) = result else { return XCTFail("expected success") }
         XCTAssertTrue(delays.groups.isEmpty)
         XCTAssertTrue(mock.requests.isEmpty) // no network call
+    }
+
+    func testDelaysRejectsMalformedServiceDateWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        for bad in ["20260101", "2026-13-01", "2026-02-30", "2026-1-01", ""] {
+            let result = try await client.realtime.delays(byServiceDate: ["2026-01-01": ["T1"], bad: ["T2"]])
+            guard case .failure(let error) = result else { return XCTFail("expected failure for \(bad)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, "serviceDate")
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
     }
 }
 

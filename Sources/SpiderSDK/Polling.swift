@@ -4,8 +4,7 @@ private let DEFAULT_POLL_INTERVAL_MS = 15_000
 
 /// Change-detecting realtime polling. Each stream calls the underlying surface on an interval and yields a
 /// value only when the result changes (by value equality) from the previous one. Cancel the consuming task
-/// (or break out of the `for await`) to stop polling — the stream finishes without throwing on cancel. A major
-/// contract mismatch throws out of the stream.
+/// (or break out of the `for await`) to stop polling — the stream finishes without throwing on cancel.
 extension SpiderRealtime {
     /// Polls `vehicles(_:)`.
     public func pollVehicles(_ tripIds: [String], intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<VehiclePositions>, Error> {
@@ -22,7 +21,7 @@ extension SpiderRealtime {
         poll(intervalMs: intervalMs) { try await self.delays(byServiceDate: byServiceDate) }
     }
 
-    /// Polls `delays(_:serviceDate:)` for a set of trips all on one service date (`YYYYMMDD`).
+    /// Polls `delays(_:serviceDate:)` for a set of trips all on one service date (`YYYY-MM-DD`).
     public func pollDelays(_ tripIds: [String], serviceDate: String, intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<TripDelays>, Error> {
         poll(intervalMs: intervalMs) { try await self.delays(tripIds, serviceDate: serviceDate) }
     }

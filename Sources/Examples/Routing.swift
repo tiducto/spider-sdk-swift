@@ -121,8 +121,12 @@ func streamItineraries(client: SpiderClient) async throws {
             for itinerary in itineraries {
                 print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?"), \(itinerary.numberOfTransfers) transfers")
             }
-        case .done(let info):
-            print("done · more later: \(info.hasNextPage)")
+        case .done(let done):
+            // A search that found nothing says why here, as a batch plan's routingErrors do.
+            for routingError in done.routingErrors {
+                print("no result: \(routingError.code)")
+            }
+            print("done · more later: \(done.pageInfo.hasNextPage)")
         case .failure(let error):
             print("stream failed: \(error.message)")
         }
@@ -141,8 +145,8 @@ func streamMoreItineraries(client: SpiderClient) async throws {
     // Stream the first window, keeping the terminal page to continue from.
     var pageInfo: RoutePageInfo?
     for await event in client.routing.planStream(options, targetResults: 5) {
-        if case .done(let info) = event {
-            pageInfo = info
+        if case .done(let done) = event {
+            pageInfo = done.pageInfo
         }
     }
 
@@ -170,8 +174,8 @@ func streamEarlierItineraries(client: SpiderClient) async throws {
     // Stream the first window, keeping the terminal page to page backwards from.
     var pageInfo: RoutePageInfo?
     for await event in client.routing.planStream(options, targetResults: 5) {
-        if case .done(let info) = event {
-            pageInfo = info
+        if case .done(let done) = event {
+            pageInfo = done.pageInfo
         }
     }
 
@@ -480,44 +484,41 @@ func streamWithLimits(client: SpiderClient) async throws {
 /// Branch on the stable `SpiderError.code` taxonomy for programmatic error handling.
 func handleRoutingErrors(client: SpiderClient) async throws {
     // [START handleErrors]
-    do {
-        let result = try await client.routing.plan(PlanOptions(
-            origin: .coordinate(49.1951, 16.6068),
-            destination: .coordinate(49.2246, 16.5747),
-            departAt: Date(),
-            searchWindowMinutes: 60
-        ))
+    let result = try await client.routing.plan(PlanOptions(
+        origin: .coordinate(49.1951, 16.6068),
+        destination: .coordinate(49.2246, 16.5747),
+        departAt: Date(),
+        searchWindowMinutes: 60
+    ))
 
-        switch result {
-        case .success(let route):
-            print("\(route.edges.count) itineraries")
-        case .failure(let error):
-            // `error.code` is the stable, language-agnostic category — branch on it, not on `message`.
-            switch error.code {
-            case .unauthorized:
-                print("check your API key (HTTP \(error.httpStatus ?? 0))")
-            case .badRequest:
-                // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
-                print("invalid request on \(error.field ?? "input"): \(error.message)")
-            case .rateLimited:
-                print("slow down — too many requests")
-            case .timeout:
-                print("the gateway took too long; retry")
-            case .network:
-                print("no connection to the gateway")
-            case .notFound:
-                print("nothing matched this request")
-            case .server:
-                print("gateway error \(error.httpStatus ?? 0), code=\(error.serverCode ?? "?")")
-            case .decoding:
-                print("could not decode the response")
-            case .unknown:
-                print("unexpected failure: \(error.message)")
-            }
+    switch result {
+    case .success(let route):
+        print("\(route.edges.count) itineraries")
+    case .failure(let error):
+        // `error.code` is the stable, language-agnostic category — branch on it, not on `message`.
+        switch error.code {
+        case .unauthorized where error.serverCode == "persisted_query_rejected":
+            print("this SDK version is too old for the API: update the SDK")
+        case .unauthorized:
+            print("check your API key (HTTP \(error.httpStatus ?? 0))")
+        case .badRequest:
+            // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
+            print("invalid request on \(error.field ?? "input"): \(error.message)")
+        case .rateLimited:
+            print("slow down — too many requests")
+        case .timeout:
+            print("the gateway took too long; retry")
+        case .network:
+            print("no connection to the gateway")
+        case .notFound:
+            print("nothing matched this request")
+        case .server:
+            print("gateway error \(error.httpStatus ?? 0), code=\(error.serverCode ?? "?")")
+        case .decoding:
+            print("could not decode the response")
+        case .unknown:
+            print("unexpected failure: \(error.message)")
         }
-    } catch let mismatch as SpiderContractMismatchError {
-        // The one failure the SDK throws instead of returning: the gateway speaks a different MAJOR contract version.
-        print("SDK/gateway contract mismatch: \(mismatch.message)")
     }
     // [END handleErrors]
 }

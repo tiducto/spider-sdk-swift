@@ -1,9 +1,15 @@
 import Foundation
 
-/// A stop returned by search.
+/// A stop returned by search. A station's platforms are folded into it, so the station is returned instead.
 public struct Stop: Sendable, Equatable {
     public let gtfsId: String
     public let name: String
+    /// The short public code riders know the stop by (GTFS `stop_code`), when the feed has one.
+    public let code: String?
+    /// GTFS `location_type`: `0` a stop or platform, `1` a station. Nil means a stop.
+    public let locationType: Int?
+    /// Whether a rider in a wheelchair can board here (GTFS `wheelchair_boarding`). Nil = no information.
+    public let wheelchairBoarding: WheelchairBoarding?
     public let lat: Double?
     public let lon: Double?
     public let country: String?
@@ -98,8 +104,6 @@ public final class SpiderStops {
             let body = try buildStopSearchRequest(filter)
             let response: StopSearchResponse = try await transport.postJson("/stops/search", body, errorMessage: extractStopError)
             return .success(response.hits.map(toStop))
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }
@@ -112,8 +116,6 @@ public final class SpiderStops {
             let body = StopSearchRequest(q: "", filter: "\"gtfsId\" = \"\(escapeFilter(gtfsId))\"", sort: nil, limit: 1)
             let response: StopSearchResponse = try await transport.postJson("/stops/search", body, errorMessage: extractStopError)
             return response.hits.first.map(toStop)
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             throw toSpiderError(error)
         }
@@ -187,9 +189,19 @@ private func extractStopError(_ text: String) -> String {
 
 private func toStop(_ hit: StopHit) -> Stop {
     Stop(
-        gtfsId: hit.gtfsId, name: hit.name, lat: hit.lat, lon: hit.lon,
+        gtfsId: hit.gtfsId, name: hit.name, code: hit.code, locationType: hit.locationType,
+        wheelchairBoarding: wheelchairBoarding(gtfs: hit.wheelchairBoarding), lat: hit.lat, lon: hit.lon,
         country: hit.country, region: hit.region, district: hit.district, city: hit.city, suburb: hit.suburb
     )
+}
+
+// GTFS `wheelchair_boarding` codes onto the routing enum: 1 possible, 2 not possible, anything else no information.
+private func wheelchairBoarding(gtfs code: Int?) -> WheelchairBoarding? {
+    switch code {
+    case 1: return .possible
+    case 2: return .notPossible
+    default: return nil
+    }
 }
 
 // MARK: - wire types (hand-written, mirroring the TS SDK; not generated)
@@ -209,6 +221,9 @@ private struct StopSearchResponse: Decodable {
 private struct StopHit: Decodable {
     let gtfsId: String
     let name: String
+    let code: String?
+    let locationType: Int?
+    let wheelchairBoarding: Int?
     let lat: Double?
     let lon: Double?
     let country: String?

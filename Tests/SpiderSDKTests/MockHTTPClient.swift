@@ -6,8 +6,8 @@ import FoundationNetworking
 #endif
 
 /// A recording `HTTPClient` for tests. `handler` decides the response from the request; every request is
-/// captured for later inspection. Responses carry the `x-spider-contract-version: 0.1` header by default so
-/// the contract check passes.
+/// captured for later inspection. Responses carry an `x-spider-contract-version` header by default, which the
+/// SDK treats as informational.
 final class MockHTTPClient: HTTPClient, @unchecked Sendable {
     struct Response {
         var status: Int = 200

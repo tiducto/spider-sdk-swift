@@ -133,8 +133,6 @@ public final class SpiderRealtime {
                 freshness: mapFreshness(dto.feedTimestamp, dto.staleSeconds)
             )
             return .success(positions)
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }
@@ -157,16 +155,18 @@ public final class SpiderRealtime {
                 vehicle: dto.vehicle.map(mapVehicle),
                 freshness: mapFreshness(dto.feedTimestamp, dto.staleSeconds)
             ))
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }
     }
 
     /// Live delays, resolved per `(tripId, serviceDate)` instance: group trip ids by the GTFS service date
-    /// (`YYYYMMDD`) they run on — pass each leg's `serviceDate` through. An all-empty input skips the request.
+    /// (`YYYY-MM-DD`) they run on — pass each leg's or departure's `serviceDate` through. An all-empty input
+    /// skips the request; a malformed date fails as `.badRequest` without a request.
     public func delays(byServiceDate: [String: [String]]) async throws -> SpiderResult<TripDelays> {
+        if let bad = byServiceDate.keys.first(where: { !isServiceDate($0) }) {
+            return .failure(invalidServiceDate(bad, in: "delays"))
+        }
         guard byServiceDate.contains(where: { !$0.value.isEmpty }) else { return .success(EMPTY_DELAYS) }
         do {
             let body = DelaysRequest(queries: byServiceDate.map { DelayQuery(serviceDate: $0.key, tripIds: $0.value) })
@@ -176,14 +176,12 @@ public final class SpiderRealtime {
                 freshness: mapFreshness(dto.feedTimestamp, dto.staleSeconds)
             )
             return .success(delays)
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }
     }
 
-    /// Live delays for `tripIds` all on one `serviceDate` (`YYYYMMDD`) — the common single-day case.
+    /// Live delays for `tripIds` all on one `serviceDate` (`YYYY-MM-DD`) — the common single-day case.
     public func delays(_ tripIds: [String], serviceDate: String) async throws -> SpiderResult<TripDelays> {
         try await delays(byServiceDate: [serviceDate: tripIds])
     }
@@ -197,8 +195,6 @@ public final class SpiderRealtime {
                 freshness: mapFreshness(dto.feedTimestamp, dto.staleSeconds)
             )
             return .success(alerts)
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }

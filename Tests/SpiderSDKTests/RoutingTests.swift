@@ -162,18 +162,39 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(error.message, "searchWindow exceeds the maximum of PT2H")
     }
 
-    func testContractMismatchThrowsInsteadOfReturning() async throws {
+    // The contract-version response header is informational: a gateway declaring another major still answers.
+    func testOtherContractMajorOnResponseIsIgnored() async throws {
         let (client, _) = makeClient { _ in json(self.planBody, contractVersion: "4.0") }
-        do {
-            _ = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
-            XCTFail("expected throw")
-        } catch let error as SpiderContractMismatchError {
-            XCTAssertEqual(error.expected, "0.7")
-            XCTAssertEqual(error.actual, "4.0")
-        }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .success(let route) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(route.edges.count, 1)
     }
 
-    func testDeparturesMapsAndDropsSiblingTerminatingTrips() async throws {
+    // The gateway's 403 for a query id it no longer serves (retired) tells the app to update the SDK.
+    func testRetiredPersistedQueryMapsToUpdateTheSdk() async throws {
+        let body = #"{"error":"persisted_query_rejected","message":"unknown persisted-query id: abc"}"#
+        let (client, _) = makeClient { _ in json(body, status: 403) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .unauthorized)
+        XCTAssertEqual(error.httpStatus, 403)
+        XCTAssertEqual(error.serverCode, "persisted_query_rejected")
+        XCTAssertTrue(error.message.contains("update the SDK"))
+    }
+
+    // A 403 without the gateway's persisted-query marker (a key not accepted here) keeps the plain key message.
+    func testOtherForbiddenStaysAKeyProblem() async throws {
+        let (client, _) = makeClient { _ in json(#"{"error":"Access to this API has been disallowed"}"#, status: 403) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .unauthorized)
+        XCTAssertNil(error.serverCode)
+        XCTAssertFalse(error.message.contains("update the SDK"))
+    }
+
+    // Every boardable row is kept, including one whose headsign matches the stop name (the router, not the SDK,
+    // drops a trip's arrival-only terminus).
+    func testDeparturesMapsEveryRowWithServiceDate() async throws {
         let body = """
         {"data":{"asStop":{"gtfsId":"S","name":"Main Square","wheelchairBoarding":"POSSIBLE","stoptimesWithoutPatterns":[
           {"serviceDay":1700000000,"scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","headsign":"Airport","trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","route":{"shortName":"12","longName":"Line 12","mode":"BUS"}}},
@@ -183,8 +204,9 @@ final class RoutingTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(body) }
         let result = try await client.routing.departures("S", numberOfDepartures: 10)
         guard case .success(let departures) = result else { return XCTFail("expected success") }
-        XCTAssertEqual(departures.count, 1) // second dropped: headsign == stop name (case-insensitive)
+        XCTAssertEqual(departures.map(\.tripGtfsId), ["T1", "T2"])
         let d = departures[0]
+        XCTAssertEqual(d.serviceDate, "2023-11-15")
         XCTAssertEqual(d.scheduledTimeEpochMs, (1_700_000_000 + 36_000) * 1000)
         XCTAssertEqual(d.realtimeTimeEpochMs, (1_700_000_000 + 36_060) * 1000)
         XCTAssertEqual(d.mode, .bus)
@@ -192,6 +214,30 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(d.isRealtime)
         let vars = mock.requests[0].bodyJSON["variables"] as! [String: Any]
         XCTAssertEqual(vars["numberOfDepartures"] as? Int, 10)
+    }
+
+    // A night departure past midnight belongs to the previous service date: serviceDay is 2026-09-28's
+    // noon-minus-12h in Europe/Prague (22:00Z on the 27th), and 24:40 is 00:40 on the 29th local time.
+    func testNightDepartureKeepsItsServiceDate() async throws {
+        let body = """
+        {"data":{"asStop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[
+          {"serviceDay":1790546400,"scheduledDeparture":88800,"headsign":"Depot","trip":{"gtfsId":"N1","route":{"shortName":"N90","mode":"BUS"}}}
+        ]}}}
+        """
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let departures) = try await client.routing.departures("S") else { return XCTFail("expected success") }
+        XCTAssertEqual(departures[0].serviceDate, "2026-09-28")
+    }
+
+    func testTripRejectsMalformedServiceDateWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        for bad in ["20260921", "2026-09-31", "21-09-2026", "2026-09-21T00:00:00Z"] {
+            let result = try await client.routing.trip("T1", serviceDate: bad)
+            guard case .failure(let error) = result else { return XCTFail("expected failure for \(bad)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, "serviceDate")
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
     }
 
     func testTripMapsStopsGeometryAndEnums() async throws {
@@ -205,6 +251,7 @@ final class RoutingTests: XCTestCase {
         guard case .success(let trip) = result else { return XCTFail("expected success") }
         XCTAssertEqual(trip.mode, .bus)
         XCTAssertEqual(trip.bikesAllowed, .notAllowed)
+        XCTAssertEqual(trip.serviceDate, "2023-11-15")
         XCTAssertEqual(trip.stops.count, 1)
         XCTAssertEqual(trip.stops[0].scheduledArrivalEpochMs, (1_700_000_000 + 36_000) * 1000)
         XCTAssertEqual(trip.stops[0].wheelchairBoarding, .possible)
