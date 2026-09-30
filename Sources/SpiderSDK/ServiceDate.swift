@@ -26,12 +26,3 @@ func isServiceDate(_ value: String) -> Bool {
           let day = Int(value.suffix(2)) else { return false }
     return DateComponents(year: year, month: month, day: day).isValidDate(in: utcCalendar)
 }
-
-// The typed failure for a malformed service date, raised before any request is sent.
-func invalidServiceDate(_ value: String, in call: String) -> SpiderError {
-    SpiderError(
-        code: .badRequest,
-        message: "\(call): serviceDate must be an ISO YYYY-MM-DD date, got \"\(value)\"",
-        field: "serviceDate"
-    )
-}

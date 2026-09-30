@@ -8,7 +8,8 @@ public struct Stop: Sendable, Equatable {
     public let code: String?
     /// GTFS `location_type`: `0` a stop or platform, `1` a station. Nil means a stop.
     public let locationType: Int?
-    /// Whether a rider in a wheelchair can board here (GTFS `wheelchair_boarding`). Nil = no information.
+    /// Whether a rider in a wheelchair can board here (GTFS `wheelchair_boarding`). Nil = no information; a code
+    /// GTFS doesn't define is `.unknown`.
     public let wheelchairBoarding: WheelchairBoarding?
     /// The modes of the routes serving the stop (a station's cover all its platforms), each once. Empty when no
     /// route serves it. A mode this SDK doesn't know is `.unknown`.
@@ -212,12 +213,14 @@ private func toStop(_ hit: StopHit) -> Stop {
     )
 }
 
-// GTFS `wheelchair_boarding` codes onto the routing enum: 1 possible, 2 not possible, anything else no information.
+// GTFS `wheelchair_boarding` codes onto the routing enum: 0 or absent is no information, 1 possible, 2 not
+// possible, and a code GTFS doesn't define is `.unknown`.
 private func wheelchairBoarding(gtfs code: Int?) -> WheelchairBoarding? {
     switch code {
+    case nil, 0: return nil
     case 1: return .possible
     case 2: return .notPossible
-    default: return nil
+    default: return .unknown
     }
 }
 

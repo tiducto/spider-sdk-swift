@@ -162,7 +162,7 @@ final class Transport {
             let text = String(data: respData, encoding: .utf8) ?? ""
             let env = parseErrorEnvelope(text)
             let message = errorMessage?(text) ?? env.message ?? String(text.prefix(300))
-            throw TransportError(.http, "POST \(path) -> \(response.statusCode): \(message)", httpStatus: response.statusCode, serverCode: env.code)
+            throw TransportError(.http, "POST \(path) -> \(response.statusCode): \(message)", httpStatus: response.statusCode, serverCode: env.code, field: validationField(message))
         }
         return try decode(from: respData, where: "POST \(path)")
     }
@@ -172,7 +172,7 @@ final class Transport {
         if !raw.ok {
             let env = parseErrorEnvelope(raw.text)
             let detail = env.message ?? String(raw.text.prefix(300))
-            throw TransportError(.http, "GET \(path) -> \(raw.status): \(detail)", httpStatus: raw.status, serverCode: env.code)
+            throw TransportError(.http, "GET \(path) -> \(raw.status): \(detail)", httpStatus: raw.status, serverCode: env.code, field: validationField(detail))
         }
         return try decode(from: raw.data, where: "GET \(path)")
     }

@@ -9,7 +9,7 @@ public enum SpiderErrorCode: String, Sendable {
     case notFound = "not_found"
     case server
     case rateLimited = "rate_limited"
-    /// The routing query this SDK version calls has been retired by the API (HTTP 410).
+    /// The persisted routing query behind the call is retired: the API no longer serves it (HTTP 410).
     case queryRetired = "query_retired"
     case decoding
     case unknown
@@ -26,8 +26,8 @@ public struct SpiderError: Error {
     /// The machine-readable `code` from a server JSON error envelope, when present: e.g. `query_retired` on a
     /// `.queryRetired`, or `persisted_query_rejected` (HTTP 403) when the gateway doesn't know the query id.
     public let serverCode: String?
-    /// For a `badRequest` (a missing or out-of-range value, or a malformed `via`, rejected by the SDK before
-    /// sending or by the server), the offending input field when one is named. Nil otherwise.
+    /// For a `badRequest` (a missing, out-of-range or invalid value, rejected by the SDK before sending or by the
+    /// server), the offending input's wire name when one is named. Nil otherwise.
     public let field: String?
     /// The underlying error, when one caused this failure.
     public let cause: Error?
@@ -60,7 +60,8 @@ struct TransportError: Error {
     let message: String
     let httpStatus: Int?
     let serverCode: String?
-    // Set only for `.badRequest`: the offending input field the server named, if any.
+    // The offending input field the server named, if any: from a BAD_REQUEST extension, or from an HTTP error
+    // message of the fixed `<field> is …` shape.
     let field: String?
 
     init(_ kind: TransportErrorKind, _ message: String, httpStatus: Int? = nil, serverCode: String? = nil, field: String? = nil) {
@@ -105,13 +106,32 @@ func routingHTTPError(_ path: String, status: Int, body: String) -> TransportErr
     }
     let detail = env.message ?? String(body.prefix(300))
     let serverCode = env.error == PERSISTED_QUERY_REJECTED ? PERSISTED_QUERY_REJECTED : env.code
-    return TransportError(.http, "routing \(path) -> \(status): \(detail)", httpStatus: status, serverCode: serverCode)
+    return TransportError(.http, "routing \(path) -> \(status): \(detail)", httpStatus: status, serverCode: serverCode, field: validationField(detail))
 }
 
-// The typed failure for an input outside its allowed range, raised before any request is sent. Names only the
-// field, never the limit.
+private let VALIDATION_PROBLEMS = [" is out of range", " is required", " is invalid"]
+
+// The field a server validation message names, when the message has the fixed `<field> is out of range`,
+// `<field> is required` or `<field> is invalid` shape. Nil for any other message.
+func validationField(_ message: String) -> String? {
+    let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    for problem in VALIDATION_PROBLEMS where text.hasSuffix(problem) {
+        let field = text.dropLast(problem.count)
+        guard let first = field.first, first.isASCII, first.isLetter || first == "_",
+              field.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }) else { return nil }
+        return String(field)
+    }
+    return nil
+}
+
+// The typed failures for an input the SDK rejects before any request is sent. They name only the field, never
+// the limit or the value.
 func outOfRange(_ field: String) -> SpiderError {
     SpiderError(code: .badRequest, message: "\(field) is out of range", field: field)
+}
+
+func invalid(_ field: String) -> SpiderError {
+    SpiderError(code: .badRequest, message: "\(field) is invalid", field: field)
 }
 
 /// Maps any thrown error into the public `SpiderError` taxonomy. Mirrors the TS SDK's `toSpiderError`.
@@ -133,7 +153,7 @@ func toSpiderError(_ error: Error) -> SpiderError {
             case 500...599: code = .server
             default: code = .unknown
             }
-            return SpiderError(code: code, message: te.message, httpStatus: status, serverCode: te.serverCode)
+            return SpiderError(code: code, message: te.message, httpStatus: status, serverCode: te.serverCode, field: code == .badRequest ? te.field : nil)
         case .noData:
             return SpiderError(code: .notFound, message: te.message)
         case .badRequest:

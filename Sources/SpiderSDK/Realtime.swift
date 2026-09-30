@@ -111,6 +111,8 @@ public struct ServiceAlerts: Sendable, Equatable {
 }
 
 private let EMPTY_FRESHNESS = FeedFreshness(feedTimestampEpochMs: nil, staleSeconds: nil)
+private let EMPTY_POSITIONS = VehiclePositions(vehicles: [], missing: [], freshness: EMPTY_FRESHNESS)
+private let EMPTY_DELAYS = TripDelays(groups: [], freshness: EMPTY_FRESHNESS)
 private let MAX_TRIP_IDS = 50
 
 /// The realtime surface: live vehicle positions, schedule deviations, and service alerts. Poll-based —
@@ -122,10 +124,11 @@ public final class SpiderRealtime {
         self.transport = transport
     }
 
-    /// Live positions for the given trips, 1 to 50 per call. Any other count fails as `.badRequest` (field
-    /// `tripIds`) without a request.
+    /// Live positions for the given trips, up to 50 per call. No trip ids return an empty result without a
+    /// request; more than 50 fail as `.badRequest` (field `tripIds`) without a request.
     public func vehicles(_ tripIds: [String]) async throws -> SpiderResult<VehiclePositions> {
-        guard (1...MAX_TRIP_IDS).contains(tripIds.count) else { return .failure(outOfRange("tripIds")) }
+        guard !tripIds.isEmpty else { return .success(EMPTY_POSITIONS) }
+        guard tripIds.count <= MAX_TRIP_IDS else { return .failure(outOfRange("tripIds")) }
         do {
             let dto: VehiclesResponse = try await transport.getJson("/realtime/vehicles", query: [("tripIds", tripIds.joined(separator: ","))])
             let positions = VehiclePositions(
@@ -149,7 +152,8 @@ public final class SpiderRealtime {
                 return .success(LiveVehicleUpdate(vehicle: nil, freshness: EMPTY_FRESHNESS))
             }
             if !raw.ok {
-                throw TransportError(.http, "GET \(path) -> \(raw.status): \(String(raw.text.prefix(300)))", httpStatus: raw.status)
+                let detail = String(raw.text.prefix(300))
+                throw TransportError(.http, "GET \(path) -> \(raw.status): \(detail)", httpStatus: raw.status, field: validationField(detail))
             }
             let dto: VehicleByTripResponse = try decode(from: raw.data, where: "GET /realtime/vehicles/by-trip")
             return .success(LiveVehicleUpdate(
@@ -162,15 +166,17 @@ public final class SpiderRealtime {
     }
 
     /// Live delays, resolved per `(tripId, serviceDate)` instance: group trip ids by the GTFS service date
-    /// (`YYYY-MM-DD`) they run on — pass each leg's, departure's or trip's `serviceDate` through. 1 to 50 trip
-    /// ids per call, counted across all dates. A malformed date (field `serviceDate`) or any other count (field
-    /// `tripIds`) fails as `.badRequest` without a request.
+    /// (`YYYY-MM-DD`) they run on — pass each leg's, departure's or trip's `serviceDate` through. Up to 50 trip
+    /// ids per call, counted across all dates; no trip ids return an empty result without a request. A malformed
+    /// date (field `serviceDate`) or more than 50 trip ids (field `tripIds`) fail as `.badRequest` without a
+    /// request.
     public func delays(byServiceDate: [String: [String]]) async throws -> SpiderResult<TripDelays> {
-        if let bad = byServiceDate.keys.first(where: { !isServiceDate($0) }) {
-            return .failure(invalidServiceDate(bad, in: "delays"))
+        if byServiceDate.keys.contains(where: { !isServiceDate($0) }) {
+            return .failure(invalid("serviceDate"))
         }
         let tripIdCount = byServiceDate.values.reduce(0) { $0 + $1.count }
-        guard (1...MAX_TRIP_IDS).contains(tripIdCount) else { return .failure(outOfRange("tripIds")) }
+        guard tripIdCount > 0 else { return .success(EMPTY_DELAYS) }
+        guard tripIdCount <= MAX_TRIP_IDS else { return .failure(outOfRange("tripIds")) }
         do {
             let body = DelaysRequest(queries: byServiceDate.map { DelayQuery(serviceDate: $0.key, tripIds: $0.value) })
             let dto: DelaysResponse = try await transport.postJson("/realtime/delays", body)

@@ -24,8 +24,19 @@ public struct Leg: Sendable, Equatable {
     public let toName: String?
     public let fromGtfsId: String?
     public let toGtfsId: String?
+    /// The platform (GTFS `platform_code`) the leg boards at / alights at, when the feed has one.
+    public let fromPlatformCode: String?
+    public let toPlatformCode: String?
+    /// The fare zone (GTFS `zone_id`) of the boarding / alighting stop, when the feed has one.
+    public let fromZoneId: String?
+    public let toZoneId: String?
+    public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
+    /// The route's colour and the colour of text drawn on it: raw GTFS hex without `#` (e.g. `"FF0000"`),
+    /// passed through as the feed gives it. Nil when the feed has none.
+    public let routeColor: String?
+    public let routeTextColor: String?
     public let headsign: String?
     public let distanceMeters: Double?
     public let durationSeconds: Double?
@@ -91,9 +102,20 @@ public struct Departure: Sendable, Equatable {
     /// The GTFS service date (`YYYY-MM-DD`) this departure's trip runs on — the previous day for a night
     /// departure past midnight. Pass it with `tripGtfsId` to `SpiderRouting.trip` and `SpiderRealtime.delays`.
     public let serviceDate: String
+    public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
+    /// The route's colour and the colour of text drawn on it: raw GTFS hex without `#` (e.g. `"FF0000"`),
+    /// passed through as the feed gives it. Nil when the feed has none.
+    public let routeColor: String?
+    public let routeTextColor: String?
     public let mode: TransitMode?
+    /// The stop this departure leaves from (for a station, the platform) and its platform code (GTFS
+    /// `platform_code`), when the feed has one.
+    public let stopGtfsId: String?
+    public let platformCode: String?
+    /// Whether a wheelchair user can ride this departure's trip. Nil = no information.
+    public let wheelchairAccessible: WheelchairBoarding?
 }
 
 /// One stop on a trip's timetable.
@@ -108,17 +130,27 @@ public struct TripStop: Sendable, Equatable {
     public let realtimeDepartureEpochMs: Int64?
     public let isRealtime: Bool
     public let wheelchairBoarding: WheelchairBoarding?
+    /// The platform (GTFS `platform_code`) and fare zone (GTFS `zone_id`) of the stop, when the feed has them.
+    public let platformCode: String?
+    public let zoneId: String?
 }
 
 /// A single trip's route, stops, and geometry.
 public struct TripDetails: Sendable, Equatable {
     public let gtfsId: String
+    public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
+    /// The route's colour and the colour of text drawn on it: raw GTFS hex without `#` (e.g. `"FF0000"`),
+    /// passed through as the feed gives it. Nil when the feed has none.
+    public let routeColor: String?
+    public let routeTextColor: String?
     public let mode: TransitMode?
     public let headsign: String?
     public let directionId: String?
     public let bikesAllowed: BikesAllowed?
+    /// Whether a wheelchair user can ride this trip. Nil = no information.
+    public let wheelchairAccessible: WheelchairBoarding?
     /// The GTFS service date (`YYYY-MM-DD`) the stop times are for — the value to pass to
     /// `SpiderRealtime.delays`. Nil when the trip has no stop times on the requested day.
     public let serviceDate: String?
@@ -322,7 +354,7 @@ public final class SpiderRouting {
     /// `Leg`'s `serviceDate`; nil = today). A malformed date fails as `.badRequest` without a request.
     public func trip(_ tripId: String, serviceDate: String? = nil) async throws -> SpiderResult<TripDetails> {
         if let serviceDate, !isServiceDate(serviceDate) {
-            return .failure(invalidServiceDate(serviceDate, in: "trip"))
+            return .failure(invalid("serviceDate"))
         }
         do {
             let variables = TripVariables(id: tripId, serviceDate: serviceDate)
@@ -604,8 +636,15 @@ private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
         toName: w.to.name,
         fromGtfsId: w.from.stop?.gtfsId,
         toGtfsId: w.to.stop?.gtfsId,
+        fromPlatformCode: w.from.stop?.platformCode,
+        toPlatformCode: w.to.stop?.platformCode,
+        fromZoneId: w.from.stop?.zoneId,
+        toZoneId: w.to.stop?.zoneId,
+        routeGtfsId: w.route?.gtfsId,
         routeShortName: w.route?.shortName,
         routeLongName: w.route?.longName,
+        routeColor: w.route?.color,
+        routeTextColor: w.route?.textColor,
         headsign: w.headsign,
         distanceMeters: w.distance,
         durationSeconds: w.duration,
@@ -659,9 +698,15 @@ private func mapDepartures(_ stop: StopDeparturesStop2) -> [Departure] {
             headsign: st.headsign,
             tripGtfsId: st.trip?.gtfsId,
             serviceDate: isoServiceDate(ofServiceDay: serviceDay),
+            routeGtfsId: route?.gtfsId,
             routeShortName: route?.shortName,
             routeLongName: route?.longName,
-            mode: TransitMode.fromWire(route?.mode?.rawValue)
+            routeColor: route?.color,
+            routeTextColor: route?.textColor,
+            mode: TransitMode.fromWire(route?.mode?.rawValue),
+            stopGtfsId: st.stop?.gtfsId,
+            platformCode: st.stop?.platformCode,
+            wheelchairAccessible: WheelchairBoarding.fromWire(st.trip?.wheelchairAccessible?.rawValue)
         ))
     }
     return out
@@ -686,17 +731,23 @@ private func mapTrip(_ w: TripTrip) -> TripDetails {
             realtimeArrivalEpochMs: at(st.realtimeArrival),
             realtimeDepartureEpochMs: at(st.realtimeDeparture),
             isRealtime: st.realtime ?? false,
-            wheelchairBoarding: WheelchairBoarding.fromWire(s.wheelchairBoarding?.rawValue)
+            wheelchairBoarding: WheelchairBoarding.fromWire(s.wheelchairBoarding?.rawValue),
+            platformCode: s.platformCode,
+            zoneId: s.zoneId
         ))
     }
     return TripDetails(
         gtfsId: w.gtfsId,
+        routeGtfsId: w.route.gtfsId,
         routeShortName: w.route.shortName,
         routeLongName: w.route.longName,
+        routeColor: w.route.color,
+        routeTextColor: w.route.textColor,
         mode: TransitMode.fromWire(w.route.mode?.rawValue),
         headsign: w.tripHeadsign,
         directionId: w.directionId,
         bikesAllowed: BikesAllowed.fromWire(w.bikesAllowed?.rawValue),
+        wheelchairAccessible: WheelchairBoarding.fromWire(w.wheelchairAccessible?.rawValue),
         serviceDate: w.stoptimesForDate?.lazy.compactMap(\.serviceDay).first.map { isoServiceDate(ofServiceDay: $0) },
         stops: stops,
         geometry: w.tripGeometry?.points.map(decodePolyline) ?? []
