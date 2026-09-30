@@ -111,10 +111,12 @@ private let PLAN_LIMIT_MESSAGES = [
 ]
 
 // A plan-limit refusal as a transport error, whatever the HTTP status (a proxy may rewrite it): the body's
-// `error` decides, and the message is the body's own. Nil for any other body, so a plain 403 stays unauthorized.
+// `error` decides, and the message is the body's own, trimmed, or the fixed wording when it is missing or blank.
+// Nil for any other body, so a plain 403 stays unauthorized.
 func planLimitError(status: Int, envelope env: ErrorEnvelope) -> TransportError? {
     guard let code = env.error, let fallback = PLAN_LIMIT_MESSAGES[code] else { return nil }
-    return TransportError(.http, env.message ?? fallback, httpStatus: status, serverCode: code)
+    let message = env.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return TransportError(.http, message.isEmpty ? fallback : message, httpStatus: status, serverCode: code)
 }
 
 // A routing non-2xx as a transport error. The gateway names its own rejections in `error`: the plan limits

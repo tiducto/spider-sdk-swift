@@ -82,7 +82,7 @@ final class PlanLimitTests: XCTestCase {
         }
     }
 
-    // No status-only fallback: a 403 whose body names neither code stays unauthorized, as before.
+    // No status-only fallback: a 403 whose body names neither code stays unauthorized.
     func testPlain403StaysUnauthorized() async throws {
         let bodies = [
             "",
@@ -101,16 +101,25 @@ final class PlanLimitTests: XCTestCase {
         }
     }
 
-    // The message is the body's own; a body without one falls back to the code's fixed wording.
+    // The message is the body's own, trimmed; a body whose message is missing or blank falls back to the code's
+    // fixed wording.
     func testMessageIsTheBodyMessage() async throws {
-        let custom = #"{"error":"agreement_inactive","message":"the agreement for this project is not active"}"#
+        let custom = #"{"error":"agreement_inactive","message":" the agreement for this project is not active\n"}"#
         for (surface, error) in try await surfaceErrors(json(custom, status: 403)) {
             XCTAssertEqual(error.code, .agreementInactive, surface)
             XCTAssertEqual(error.message, "the agreement for this project is not active", surface)
         }
-        for (surface, error) in try await surfaceErrors(json(#"{"error":"planning_limit_reached"}"#, status: 403)) {
-            XCTAssertEqual(error.code, .planningLimitReached, surface)
-            XCTAssertEqual(error.message, "trip planning limit reached", surface)
+        let fallbacks: [(body: String, code: SpiderErrorCode, message: String)] = [
+            (#"{"error":"planning_limit_reached"}"#, .planningLimitReached, "trip planning limit reached"),
+            (#"{"error":"planning_limit_reached","message":""}"#, .planningLimitReached, "trip planning limit reached"),
+            (#"{"error":"agreement_inactive","message":"  "}"#, .agreementInactive, "agreement is not active"),
+        ]
+        for (body, code, message) in fallbacks {
+            for (surface, error) in try await surfaceErrors(json(body, status: 403)) {
+                let label = "\(surface) with body \(body)"
+                XCTAssertEqual(error.code, code, label)
+                XCTAssertEqual(error.message, message, label)
+            }
         }
     }
 }

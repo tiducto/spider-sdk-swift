@@ -34,11 +34,13 @@ Targets Spider API contract 1.0. The first stable release: from here on, breakin
   (HTTP 410).
 - **`SpiderErrorCode.planningLimitReached`** (`planning_limit_reached`) when the project has reached the
   trip-planning limit its plan includes: trip planning (`plan`, `planStream`) is refused, the other calls keep
-  working. Message `trip planning limit reached`.
+  working.
 - **`SpiderErrorCode.agreementInactive`** (`agreement_inactive`) when the project's agreement is not active:
-  every call made with the key is refused. Message `agreement is not active`.
+  every call made with the key is refused.
   Both come from the response body's code whatever the HTTP status, on every surface (including a plan stream
-  refused before it starts), and carry `httpStatus` and `serverCode`. A 403 without one stays `.unauthorized`.
+  refused before it starts). A `vehicleForTrip` 404 carrying one of them is that error, not "no vehicle". The
+  message is the body's, with `trip planning limit reached` / `agreement is not active` when the body has none,
+  and the error carries `httpStatus` and `serverCode`. A 403 without one of these codes stays `.unauthorized`.
   An exhaustive `switch` on `SpiderErrorCode` needs the three new cases.
 - **Display fields.** `Leg`: `routeGtfsId`, `routeColor`, `routeTextColor`, `fromPlatformCode`,
   `toPlatformCode`, `fromZoneId`, `toZoneId`. `Departure`: `routeGtfsId`, `routeColor`, `routeTextColor`,
