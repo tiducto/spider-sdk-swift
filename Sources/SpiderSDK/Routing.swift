@@ -33,9 +33,11 @@ public struct Leg: Sendable, Equatable {
     public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
-    /// The route's colour and the colour of text drawn on it: raw GTFS hex without `#` (e.g. `"FF0000"`),
-    /// passed through as the feed gives it. Nil when the feed has none.
+    /// The route's colour: raw GTFS hex without `#` (e.g. `"FF0000"`), passed through as the feed gives it.
+    /// Nil when the feed has none.
     public let routeColor: String?
+    /// The colour of text drawn on `routeColor`: raw GTFS hex without `#` (e.g. `"FFFFFF"`). Nil when the feed
+    /// has none.
     public let routeTextColor: String?
     public let headsign: String?
     public let distanceMeters: Double?
@@ -105,9 +107,11 @@ public struct Departure: Sendable, Equatable {
     public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
-    /// The route's colour and the colour of text drawn on it: raw GTFS hex without `#` (e.g. `"FF0000"`),
-    /// passed through as the feed gives it. Nil when the feed has none.
+    /// The route's colour: raw GTFS hex without `#` (e.g. `"FF0000"`), passed through as the feed gives it.
+    /// Nil when the feed has none.
     public let routeColor: String?
+    /// The colour of text drawn on `routeColor`: raw GTFS hex without `#` (e.g. `"FFFFFF"`). Nil when the feed
+    /// has none.
     public let routeTextColor: String?
     public let mode: TransitMode?
     /// The stop this departure leaves from (for a station, the platform) and its platform code (GTFS
@@ -141,9 +145,11 @@ public struct TripDetails: Sendable, Equatable {
     public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
-    /// The route's colour and the colour of text drawn on it: raw GTFS hex without `#` (e.g. `"FF0000"`),
-    /// passed through as the feed gives it. Nil when the feed has none.
+    /// The route's colour: raw GTFS hex without `#` (e.g. `"FF0000"`), passed through as the feed gives it.
+    /// Nil when the feed has none.
     public let routeColor: String?
+    /// The colour of text drawn on `routeColor`: raw GTFS hex without `#` (e.g. `"FFFFFF"`). Nil when the feed
+    /// has none.
     public let routeTextColor: String?
     public let mode: TransitMode?
     public let headsign: String?
