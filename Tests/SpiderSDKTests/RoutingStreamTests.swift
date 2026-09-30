@@ -259,7 +259,7 @@ final class RoutingStreamTests: XCTestCase {
     // same failure the batch calls return, carrying the body's message.
     func testPlanStreamPlanLimitRefusalFailsBeforeTheStream() async throws {
         let cases: [(body: String, code: SpiderErrorCode, message: String)] = [
-            (#"{"error":"search_limit_reached","message":"search limit reached"}"#, .searchLimitReached, "search limit reached"),
+            (#"{"error":"planning_limit_reached","message":"trip planning limit reached"}"#, .planningLimitReached, "trip planning limit reached"),
             (#"{"error":"agreement_inactive","message":"agreement is not active"}"#, .agreementInactive, "agreement is not active"),
         ]
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")

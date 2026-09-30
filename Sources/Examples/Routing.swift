@@ -504,8 +504,8 @@ func handleRoutingErrors(client: SpiderClient) async throws {
             print("invalid request on \(error.field ?? "input"): \(error.message)")
         case .queryRetired:
             print("the API has retired this query")
-        case .searchLimitReached:
-            print("the project has used the searches its plan includes")
+        case .planningLimitReached:
+            print("the project has reached the trip-planning limit its plan includes")
         case .agreementInactive:
             print("the project's agreement is not active")
         case .rateLimited:

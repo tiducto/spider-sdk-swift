@@ -11,8 +11,8 @@ public enum SpiderErrorCode: String, Sendable {
     case rateLimited = "rate_limited"
     /// The persisted routing query behind the call is retired: the API no longer serves it (HTTP 410).
     case queryRetired = "query_retired"
-    /// The project has used the searches its plan includes: the API refuses trip planning (plan and plan stream).
-    case searchLimitReached = "search_limit_reached"
+    /// The project has reached the trip-planning limit its plan includes: the API refuses plan and plan stream.
+    case planningLimitReached = "planning_limit_reached"
     /// The project's agreement is not active: the API refuses every call made with the key.
     case agreementInactive = "agreement_inactive"
     case decoding
@@ -100,13 +100,13 @@ func parseErrorEnvelope(_ text: String) -> ErrorEnvelope {
 
 let PERSISTED_QUERY_REJECTED = "persisted_query_rejected"
 let QUERY_RETIRED = "query_retired"
-let SEARCH_LIMIT_REACHED = "search_limit_reached"
+let PLANNING_LIMIT_REACHED = "planning_limit_reached"
 let AGREEMENT_INACTIVE = "agreement_inactive"
 
 // The gateway's plan-limit refusals, keyed by the `error` it names them with, and their message when the body
 // carries none.
 private let PLAN_LIMIT_MESSAGES = [
-    SEARCH_LIMIT_REACHED: "search limit reached",
+    PLANNING_LIMIT_REACHED: "trip planning limit reached",
     AGREEMENT_INACTIVE: "agreement is not active",
 ]
 
@@ -118,7 +118,7 @@ func planLimitError(status: Int, envelope env: ErrorEnvelope) -> TransportError?
 }
 
 // A routing non-2xx as a transport error. The gateway names its own rejections in `error`: the plan limits
-// (`search_limit_reached`, `agreement_inactive`), `query_retired` (HTTP 410, also the fallback when the body is
+// (`planning_limit_reached`, `agreement_inactive`), `query_retired` (HTTP 410, also the fallback when the body is
 // unreadable) and `persisted_query_rejected` (403, an id it never had).
 func routingHTTPError(_ path: String, status: Int, body: String) -> TransportError {
     let env = parseErrorEnvelope(body)
@@ -165,7 +165,7 @@ func toSpiderError(_ error: Error) -> SpiderError {
             let status = te.httpStatus ?? 0
             let code: SpiderErrorCode
             switch status {
-            case _ where te.serverCode == SEARCH_LIMIT_REACHED: code = .searchLimitReached
+            case _ where te.serverCode == PLANNING_LIMIT_REACHED: code = .planningLimitReached
             case _ where te.serverCode == AGREEMENT_INACTIVE: code = .agreementInactive
             case _ where te.serverCode == QUERY_RETIRED: code = .queryRetired
             // Realtime and stop search answer an invalid input with a plain 400 naming the field.

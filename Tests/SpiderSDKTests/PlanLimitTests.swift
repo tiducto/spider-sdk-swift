@@ -1,11 +1,11 @@
 import XCTest
 @testable import SpiderSDK
 
-/// Guards the gateway's plan-limit refusals: the body's `search_limit_reached` or `agreement_inactive` decides the
+/// Guards the gateway's plan-limit refusals: the body's `planning_limit_reached` or `agreement_inactive` decides the
 /// error on every surface, whatever the HTTP status, and carries the body's message. A 403 without one of them
 /// stays unauthorized. The plan stream's pre-stream refusal is covered in RoutingStreamTests.
 final class PlanLimitTests: XCTestCase {
-    private let searchLimitBody = #"{"error":"search_limit_reached","message":"search limit reached"}"#
+    private let planningLimitBody = #"{"error":"planning_limit_reached","message":"trip planning limit reached"}"#
     private let agreementBody = #"{"error":"agreement_inactive","message":"agreement is not active"}"#
 
     private static let surfaces = [
@@ -39,13 +39,13 @@ final class PlanLimitTests: XCTestCase {
         return errors
     }
 
-    func testSearchLimitReachedOn403OnEverySurface() async throws {
-        for (surface, error) in try await surfaceErrors(json(searchLimitBody, status: 403)) {
-            XCTAssertEqual(error.code, .searchLimitReached, surface)
-            XCTAssertEqual(error.code.rawValue, "search_limit_reached", surface)
+    func testPlanningLimitReachedOn403OnEverySurface() async throws {
+        for (surface, error) in try await surfaceErrors(json(planningLimitBody, status: 403)) {
+            XCTAssertEqual(error.code, .planningLimitReached, surface)
+            XCTAssertEqual(error.code.rawValue, "planning_limit_reached", surface)
             XCTAssertEqual(error.httpStatus, 403, surface)
-            XCTAssertEqual(error.serverCode, "search_limit_reached", surface)
-            XCTAssertEqual(error.message, "search limit reached", surface)
+            XCTAssertEqual(error.serverCode, "planning_limit_reached", surface)
+            XCTAssertEqual(error.message, "trip planning limit reached", surface)
             XCTAssertNil(error.field, surface)
         }
     }
@@ -65,7 +65,7 @@ final class PlanLimitTests: XCTestCase {
     // realtime by-trip 404 that otherwise means "no vehicle". The rewritten status is carried as received.
     func testBodyCodeWinsOverRewrittenStatus() async throws {
         let cases: [(body: String, code: SpiderErrorCode, message: String)] = [
-            (searchLimitBody, .searchLimitReached, "search limit reached"),
+            (planningLimitBody, .planningLimitReached, "trip planning limit reached"),
             (agreementBody, .agreementInactive, "agreement is not active"),
         ]
         for (body, code, message) in cases {
@@ -88,14 +88,14 @@ final class PlanLimitTests: XCTestCase {
             "",
             "forbidden",
             #"{"error":"forbidden","message":"access denied"}"#,
-            #"{"message":"search limit reached"}"#,
+            #"{"message":"trip planning limit reached"}"#,
         ]
         for body in bodies {
             for (surface, error) in try await surfaceErrors(json(body, status: 403)) {
                 let label = "\(surface) with body \(body)"
                 XCTAssertEqual(error.code, .unauthorized, label)
                 XCTAssertEqual(error.httpStatus, 403, label)
-                XCTAssertNotEqual(error.serverCode, "search_limit_reached", label)
+                XCTAssertNotEqual(error.serverCode, "planning_limit_reached", label)
                 XCTAssertNotEqual(error.serverCode, "agreement_inactive", label)
             }
         }
@@ -108,9 +108,9 @@ final class PlanLimitTests: XCTestCase {
             XCTAssertEqual(error.code, .agreementInactive, surface)
             XCTAssertEqual(error.message, "the agreement for this project is not active", surface)
         }
-        for (surface, error) in try await surfaceErrors(json(#"{"error":"search_limit_reached"}"#, status: 403)) {
-            XCTAssertEqual(error.code, .searchLimitReached, surface)
-            XCTAssertEqual(error.message, "search limit reached", surface)
+        for (surface, error) in try await surfaceErrors(json(#"{"error":"planning_limit_reached"}"#, status: 403)) {
+            XCTAssertEqual(error.code, .planningLimitReached, surface)
+            XCTAssertEqual(error.message, "trip planning limit reached", surface)
         }
     }
 }
