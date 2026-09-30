@@ -9,6 +9,8 @@ public enum SpiderErrorCode: String, Sendable {
     case notFound = "not_found"
     case server
     case rateLimited = "rate_limited"
+    /// The routing query this SDK version calls has been retired by the API (HTTP 410).
+    case queryRetired = "query_retired"
     case decoding
     case unknown
 }
@@ -21,11 +23,11 @@ public struct SpiderError: Error {
     public let message: String
     /// The HTTP status, when the failure came from an HTTP response.
     public let httpStatus: Int?
-    /// The machine-readable `code` from a server JSON error envelope, when present. `persisted_query_rejected`
-    /// (with `httpStatus` 403) means this SDK version calls a query the API no longer serves: update the SDK.
+    /// The machine-readable `code` from a server JSON error envelope, when present: e.g. `query_retired` on a
+    /// `.queryRetired`, or `persisted_query_rejected` (HTTP 403) when the gateway doesn't know the query id.
     public let serverCode: String?
-    /// For a `badRequest` (a server validation failure — over-cap `searchWindow`, malformed `via`, or a
-    /// missing required field), the offending input field when the server names one. Nil otherwise.
+    /// For a `badRequest` (a missing or out-of-range value, or a malformed `via`, rejected by the SDK before
+    /// sending or by the server), the offending input field when one is named. Nil otherwise.
     public let field: String?
     /// The underlying error, when one caused this failure.
     public let cause: Error?
@@ -92,22 +94,24 @@ func parseErrorEnvelope(_ text: String) -> ErrorEnvelope {
 }
 
 let PERSISTED_QUERY_REJECTED = "persisted_query_rejected"
+let QUERY_RETIRED = "query_retired"
 
-// A routing non-2xx as a transport error. A 403 `persisted_query_rejected` is the gateway refusing a query id
-// it no longer serves (retired after its deprecation window), so the message says to update the SDK rather
-// than pointing at the key.
+// A routing non-2xx as a transport error. The gateway names its own rejections in `error`: `query_retired`
+// (HTTP 410, also the fallback when the body is unreadable) and `persisted_query_rejected` (403, an id it never had).
 func routingHTTPError(_ path: String, status: Int, body: String) -> TransportError {
     let env = parseErrorEnvelope(body)
-    if status == 403 && env.error == PERSISTED_QUERY_REJECTED {
-        return TransportError(
-            .http,
-            "routing \(path) -> 403: this SDK version calls a query the API no longer serves; update the SDK",
-            httpStatus: status,
-            serverCode: PERSISTED_QUERY_REJECTED
-        )
+    if env.error == QUERY_RETIRED || status == 410 {
+        return TransportError(.http, "routing \(path) -> \(status): persisted query is retired", httpStatus: status, serverCode: QUERY_RETIRED)
     }
     let detail = env.message ?? String(body.prefix(300))
-    return TransportError(.http, "routing \(path) -> \(status): \(detail)", httpStatus: status, serverCode: env.code)
+    let serverCode = env.error == PERSISTED_QUERY_REJECTED ? PERSISTED_QUERY_REJECTED : env.code
+    return TransportError(.http, "routing \(path) -> \(status): \(detail)", httpStatus: status, serverCode: serverCode)
+}
+
+// The typed failure for an input outside its allowed range, raised before any request is sent. Names only the
+// field, never the limit.
+func outOfRange(_ field: String) -> SpiderError {
+    SpiderError(code: .badRequest, message: "\(field) is out of range", field: field)
 }
 
 /// Maps any thrown error into the public `SpiderError` taxonomy. Mirrors the TS SDK's `toSpiderError`.
@@ -119,6 +123,9 @@ func toSpiderError(_ error: Error) -> SpiderError {
             let status = te.httpStatus ?? 0
             let code: SpiderErrorCode
             switch status {
+            case _ where te.serverCode == QUERY_RETIRED: code = .queryRetired
+            // Realtime and stop search answer an invalid input with a plain 400 naming the field.
+            case 400: code = .badRequest
             case 401, 403: code = .unauthorized
             case 404: code = .notFound
             case 408, 504: code = .timeout

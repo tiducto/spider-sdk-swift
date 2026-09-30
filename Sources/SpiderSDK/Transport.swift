@@ -45,15 +45,25 @@ private struct GraphQLEnvelope<D: Decodable>: Decodable {
     let errors: [GraphQLEnvelopeError]?
 }
 
-private struct GraphQLEnvelopeError: Decodable {
+struct GraphQLEnvelopeError: Decodable {
     let message: String
     // Present on validation failures the gateway/router stamp; code == "BAD_REQUEST" + the offending field.
     let extensions: GraphQLErrorExtensions?
 }
 
-private struct GraphQLErrorExtensions: Decodable {
+struct GraphQLErrorExtensions: Decodable {
     let code: String?
     let field: String?
+}
+
+// Top-level GraphQL errors as a transport error: a BAD_REQUEST extension maps to typed badRequest (with its
+// field); anything else stays a generic upstream. Shared by batch calls and the plan stream.
+func graphQLErrorsError(_ errors: [GraphQLEnvelopeError], path: String) -> TransportError {
+    if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
+        return TransportError(.badRequest, bad.message, field: bad.extensions?.field)
+    }
+    let joined = errors.map { $0.message }.joined(separator: ", ")
+    return TransportError(.upstream, "routing \(path) errors: \(joined)")
 }
 
 struct RawResponse {
@@ -116,12 +126,7 @@ final class Transport {
         }
         let envelope: GraphQLEnvelope<D> = try decode(from: data, where: "routing \(op.path)")
         if let errors = envelope.errors, !errors.isEmpty {
-            // A BAD_REQUEST extension maps to typed badRequest; anything else stays a generic upstream.
-            if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
-                throw TransportError(.badRequest, bad.message, field: bad.extensions?.field)
-            }
-            let joined = errors.map { $0.message }.joined(separator: ", ")
-            throw TransportError(.upstream, "routing \(op.path) errors: \(joined)")
+            throw graphQLErrorsError(errors, path: op.path)
         }
         guard let payload = envelope.data else {
             throw TransportError(.noData, "routing \(op.path) returned no data")

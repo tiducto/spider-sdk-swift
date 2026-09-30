@@ -19,8 +19,8 @@
   ],
   "rules": [
     "Construct one SpiderClient with your environment base URL and API key — SpiderClient(baseURL: \"https://your-env-slug.api.tiducto.eu\", apiKey: \"...\") — then reach a surface via client.routing, client.stops, or client.realtime.",
-    "Plan a trip with client.routing.plan(PlanOptions(origin:destination:first:)); build locations with .coordinate(lat, lon), and page results with client.routing.planNext(page) / planPrevious(page).",
+    "Plan a trip with client.routing.plan(PlanOptions(origin:destination:departAt:searchWindowMinutes:)); build locations with .coordinate(lat, lon), and page results with client.routing.planNext(page) / planPrevious(page). client.routing.planStream(options, targetResults:, maxWindowMinutes:) requires both counts; maxWindowMinutes is at least 120.",
     "List a stop's upcoming departures with client.routing.departures(stopId, numberOfDepartures:), and fetch a single trip's timetable with client.routing.trip(tripId).",
-    "Every call returns a SpiderResult you branch on (.success / .failure) instead of throwing. A .failure with code .unauthorized and serverCode \"persisted_query_rejected\" means the API no longer serves a query this SDK version calls: update the SDK."
+    "Every call returns a SpiderResult you branch on (.success / .failure) instead of throwing. A .failure with code .badRequest names the rejected input in error.field; code .queryRetired means the API has retired the query this SDK version calls."
   ]
 }

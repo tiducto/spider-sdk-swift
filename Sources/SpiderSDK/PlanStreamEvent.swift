@@ -26,7 +26,7 @@ public enum PlanStreamEvent {
     /// Terminal: the continuation cursors and routing errors.
     case done(Done)
 
-    /// Terminal failure — a transport/HTTP problem, a decoding error, or a server `error` event (an invalid
-    /// request). Carries the same `SpiderError` taxonomy the one-shot calls return.
+    /// Terminal failure — an input the SDK rejects before sending, a transport/HTTP problem, a decoding error, or
+    /// a server error for an invalid request. Carries the same `SpiderError` taxonomy the one-shot calls return.
     case failure(SpiderError)
 }

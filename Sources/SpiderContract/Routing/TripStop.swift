@@ -4,18 +4,24 @@ public struct TripStop: Codable, Sendable {
     public let lat: Double?
     public let lon: Double?
     public let wheelchairBoarding: WheelchairBoarding?
+    public let platformCode: String?
+    public let zoneId: String?
 
     public init(
         gtfsId: String,
         name: String,
         lat: Double? = nil,
         lon: Double? = nil,
-        wheelchairBoarding: WheelchairBoarding? = nil
+        wheelchairBoarding: WheelchairBoarding? = nil,
+        platformCode: String? = nil,
+        zoneId: String? = nil
     ) {
         self.gtfsId = gtfsId
         self.name = name
         self.lat = lat
         self.lon = lon
         self.wheelchairBoarding = wheelchairBoarding
+        self.platformCode = platformCode
+        self.zoneId = zoneId
     }
 }

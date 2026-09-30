@@ -21,12 +21,12 @@ public enum ViaLocation: Sendable, Equatable {
     case passThrough(stopIds: [String])
     case visit(location: Location, minimumWaitSeconds: Int)
 
-    /// Require the route to pass through any of the given stops (no dwell).
+    /// Require the route to pass through any of the given stops (no dwell), 1 to 10 of them.
     public static func passThrough(_ stopIds: String...) -> ViaLocation {
         .passThrough(stopIds: stopIds)
     }
 
-    /// Require the route to visit a place, optionally dwelling at least `minimumWaitSeconds` there.
+    /// Require the route to visit a place, optionally dwelling at least `minimumWaitSeconds` (0 to 24 h) there.
     public static func visit(_ location: Location, minimumWaitSeconds: Int = 0) -> ViaLocation {
         .visit(location: location, minimumWaitSeconds: minimumWaitSeconds)
     }

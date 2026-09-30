@@ -1,30 +1,30 @@
-public struct TripStoptime: Codable, Sendable {
+public struct StopDeparturesStoptime: Codable, Sendable {
     public let serviceDay: Int?
-    public let scheduledArrival: Int?
     public let scheduledDeparture: Int?
-    public let realtimeArrival: Int?
     public let realtimeDeparture: Int?
     public let realtime: Bool?
     public let realtimeState: RealtimeState?
-    public let stop: TripStop?
+    public let headsign: String?
+    public let stop: StopDeparturesStop?
+    public let trip: StopDeparturesTrip?
 
     public init(
         serviceDay: Int? = nil,
-        scheduledArrival: Int? = nil,
         scheduledDeparture: Int? = nil,
-        realtimeArrival: Int? = nil,
         realtimeDeparture: Int? = nil,
         realtime: Bool? = nil,
         realtimeState: RealtimeState? = nil,
-        stop: TripStop? = nil
+        headsign: String? = nil,
+        stop: StopDeparturesStop? = nil,
+        trip: StopDeparturesTrip? = nil
     ) {
         self.serviceDay = serviceDay
-        self.scheduledArrival = scheduledArrival
         self.scheduledDeparture = scheduledDeparture
-        self.realtimeArrival = realtimeArrival
         self.realtimeDeparture = realtimeDeparture
         self.realtime = realtime
         self.realtimeState = realtimeState
+        self.headsign = headsign
         self.stop = stop
+        self.trip = trip
     }
 }

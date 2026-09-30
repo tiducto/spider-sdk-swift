@@ -1,10 +1,10 @@
 public struct StopDeparturesData: Codable, Sendable {
-    public let asStop: StopDeparturesStop?
-    public let asStation: StopDeparturesStop?
+    public let asStop: StopDeparturesStop2?
+    public let asStation: StopDeparturesStop2?
 
     public init(
-        asStop: StopDeparturesStop? = nil,
-        asStation: StopDeparturesStop? = nil
+        asStop: StopDeparturesStop2? = nil,
+        asStation: StopDeparturesStop2? = nil
     ) {
         self.asStop = asStop
         self.asStation = asStation

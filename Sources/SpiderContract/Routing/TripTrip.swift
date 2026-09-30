@@ -4,7 +4,8 @@ public struct TripTrip: Codable, Sendable {
     public let directionId: String?
     public let tripHeadsign: String?
     public let bikesAllowed: BikesAllowed?
-    public let stoptimesForDate: [TripStoptime]?
+    public let wheelchairAccessible: WheelchairBoarding?
+    public let stoptimesForDate: [Stoptime]?
     public let tripGeometry: TripGeometry?
 
     public init(
@@ -13,7 +14,8 @@ public struct TripTrip: Codable, Sendable {
         directionId: String? = nil,
         tripHeadsign: String? = nil,
         bikesAllowed: BikesAllowed? = nil,
-        stoptimesForDate: [TripStoptime]? = nil,
+        wheelchairAccessible: WheelchairBoarding? = nil,
+        stoptimesForDate: [Stoptime]? = nil,
         tripGeometry: TripGeometry? = nil
     ) {
         self.gtfsId = gtfsId
@@ -21,6 +23,7 @@ public struct TripTrip: Codable, Sendable {
         self.directionId = directionId
         self.tripHeadsign = tripHeadsign
         self.bikesAllowed = bikesAllowed
+        self.wheelchairAccessible = wheelchairAccessible
         self.stoptimesForDate = stoptimesForDate
         self.tripGeometry = tripGeometry
     }

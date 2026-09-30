@@ -115,7 +115,7 @@ func streamItineraries(client: SpiderClient) async throws {
     )
 
     // planStream emits `.result` batches as itineraries finalize, then a terminal `.done` (or `.failure`).
-    for await event in client.routing.planStream(options, targetResults: 5) {
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
         switch event {
         case .result(let itineraries):
             for itinerary in itineraries {
@@ -144,7 +144,7 @@ func streamMoreItineraries(client: SpiderClient) async throws {
 
     // Stream the first window, keeping the terminal page to continue from.
     var pageInfo: RoutePageInfo?
-    for await event in client.routing.planStream(options, targetResults: 5) {
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
         if case .done(let done) = event {
             pageInfo = done.pageInfo
         }
@@ -152,7 +152,7 @@ func streamMoreItineraries(client: SpiderClient) async throws {
 
     // Continue forward only when the terminal page says there is more, using its endCursor.
     if let pageInfo, pageInfo.hasNextPage, let cursor = pageInfo.endCursor {
-        for await event in client.routing.planStreamNext(options, targetResults: 5, after: cursor) {
+        for await event in client.routing.planStreamNext(options, targetResults: 5, maxWindowMinutes: 120, after: cursor) {
             if case .result(let itineraries) = event {
                 for itinerary in itineraries {
                     print("later: \(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
@@ -173,7 +173,7 @@ func streamEarlierItineraries(client: SpiderClient) async throws {
 
     // Stream the first window, keeping the terminal page to page backwards from.
     var pageInfo: RoutePageInfo?
-    for await event in client.routing.planStream(options, targetResults: 5) {
+    for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
         if case .done(let done) = event {
             pageInfo = done.pageInfo
         }
@@ -181,7 +181,7 @@ func streamEarlierItineraries(client: SpiderClient) async throws {
 
     // Page backward only when the terminal page says there is an earlier window, using its startCursor.
     if let pageInfo, pageInfo.hasPreviousPage, let cursor = pageInfo.startCursor {
-        for await event in client.routing.planStreamPrevious(options, targetResults: 5, before: cursor) {
+        for await event in client.routing.planStreamPrevious(options, targetResults: 5, maxWindowMinutes: 120, before: cursor) {
             if case .result(let itineraries) = event {
                 for itinerary in itineraries {
                     print("earlier: \(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
@@ -497,13 +497,13 @@ func handleRoutingErrors(client: SpiderClient) async throws {
     case .failure(let error):
         // `error.code` is the stable, language-agnostic category — branch on it, not on `message`.
         switch error.code {
-        case .unauthorized where error.serverCode == "persisted_query_rejected":
-            print("this SDK version is too old for the API: update the SDK")
         case .unauthorized:
             print("check your API key (HTTP \(error.httpStatus ?? 0))")
         case .badRequest:
-            // A server validation failure: over-cap searchWindow, bad via, or a missing required field.
+            // A missing or out-of-range value, or a malformed via, named by `field`.
             print("invalid request on \(error.field ?? "input"): \(error.message)")
+        case .queryRetired:
+            print("the API has retired this query")
         case .rateLimited:
             print("slow down — too many requests")
         case .timeout:
