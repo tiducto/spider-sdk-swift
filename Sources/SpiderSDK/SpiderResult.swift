@@ -1,7 +1,6 @@
 import Foundation
 
-/// The result of every SDK call. Ordinary failures never throw — they surface as `.failure`. The one
-/// exception is a major contract mismatch, which throws `SpiderContractMismatchError` out of the call.
+/// The result of every SDK call. Failures never throw — they surface as `.failure`.
 public enum SpiderResult<Success> {
     case success(Success)
     case failure(SpiderError)

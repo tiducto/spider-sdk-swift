@@ -31,7 +31,7 @@ func poll(client: SpiderClient) async throws {
     // [START poll]
     // Group trip ids by the GTFS service date they run on — take it from each plan leg's `serviceDate`.
     let tripIds = ["T-1", "T-2"]
-    let serviceDate = "20260101"
+    let serviceDate = "2026-01-01"
     while !Task.isCancelled {
         switch try await client.realtime.delays(tripIds, serviceDate: serviceDate) {
         case .success(let delays):
@@ -86,8 +86,8 @@ func vehicleForTrip(client: SpiderClient, tripId: String) async throws {
 /// Live schedule deviation for a set of trips, printed in minutes.
 func delays(client: SpiderClient) async throws {
     // [START delays]
-    // Delays are per trip instance — pass the GTFS service date (`YYYYMMDD`) the trips run on.
-    let result = try await client.realtime.delays(["T-1", "T-2"], serviceDate: "20260101")
+    // Delays are per trip instance — pass the GTFS service date (`YYYY-MM-DD`) the trips run on.
+    let result = try await client.realtime.delays(["T-1", "T-2"], serviceDate: "2026-01-01")
     if case .success(let trips) = result {
         for group in trips.groups {
             for delay in group.delays {

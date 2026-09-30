@@ -9,6 +9,7 @@ final class StopsGeoTests: XCTestCase {
         XCTAssertEqual(req.path, "/stops/search")
         XCTAssertEqual(req.bodyJSON["sort"] as? [String], ["_geoPoint(49.2, 16.6):asc"])
         XCTAssertEqual(req.bodyJSON["filter"] as? String, "_geoRadius(49.2, 16.6, 300.0)")
+        XCTAssertEqual(req.bodyJSON["limit"] as? Int, 20)
     }
 
     func testWithinBuildsBoundingBoxFilter() async throws {

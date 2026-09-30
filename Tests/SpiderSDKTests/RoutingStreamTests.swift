@@ -4,8 +4,8 @@ import SpiderContract
 
 /// Guards the SSE `plan-stream` handling: the record parser that turns `chunk`/`pageInfo`/`done`/`error`
 /// events into the three `PlanStreamEvent`s (`.result` / `.done` / `.failure`, including realtime-delay
-/// mapping onto legs), and the stream request's wire shape (initial + `after`/`before` continuation).
-/// Mirrors the Kotlin SDK's RoutingStreamTest.
+/// mapping onto legs), the stream request's wire shape (initial + `after`/`before` continuation), and the
+/// public `planStream` end to end over a stubbed `URLSession.shared`. Mirrors the Kotlin SDK's RoutingStreamTest.
 final class RoutingStreamTests: XCTestCase {
     // A `chunk` carries itinerary nodes; realtime delays ride on each leg's estimated{time,delay} +
     // realtimeState + realTime and must land on the domain Leg exactly as the batch plan maps them. The
@@ -23,10 +23,10 @@ final class RoutingStreamTests: XCTestCase {
                   "mode": "BUS",
                   "start": { "scheduledTime": "2026-07-15T08:00:00Z", "estimated": { "time": "2026-07-15T08:01:00Z", "delay": "PT60S" } },
                   "end":   { "scheduledTime": "2026-07-15T08:30:00Z", "estimated": { "time": "2026-07-15T08:32:00Z", "delay": "PT120S" } },
-                  "realtimeState": "UPDATED", "realTime": true, "serviceDate": "20260715",
+                  "realtimeState": "UPDATED", "realTime": true, "serviceDate": "2026-07-15",
                   "from": { "name": "Origin", "stop": { "gtfsId": "1:A" } },
                   "to":   { "name": "Dest",   "stop": { "gtfsId": "1:B" } },
-                  "route": { "shortName": "12" }, "trip": { "gtfsId": "1:T" }
+                  "route": { "gtfsId": "1:R12", "shortName": "12" }, "trip": { "gtfsId": "1:T" }
                 }
               ]
             }
@@ -48,25 +48,44 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(leg.startEstimated, "2026-07-15T08:01:00Z")
         XCTAssertTrue(leg.isRealtime)
         XCTAssertEqual(leg.realtimeState, .updated)
-        XCTAssertEqual(leg.serviceDate, "20260715")
+        XCTAssertEqual(leg.serviceDate, "2026-07-15")
         XCTAssertEqual(leg.fromGtfsId, "1:A")
         XCTAssertEqual(leg.toGtfsId, "1:B")
     }
 
-    // The `pageInfo` frame is the terminal event: it maps to `.done(RoutePageInfo)`, carrying the continuation
-    // cursors + `hasNextPage`/`hasPreviousPage` the caller reads to drive `planStreamNext`/`planStreamPrevious`.
+    // The `pageInfo` frame is the terminal event: it maps to `.done`, carrying the continuation cursors +
+    // `hasNextPage`/`hasPreviousPage` the caller reads to drive `planStreamNext`/`planStreamPrevious`. A frame
+    // without `routingErrors` means none.
     func testPageInfoMapsToTerminalDone() {
         let data = """
         { "startCursor": "c-prev", "endCursor": "c-next", "hasNextPage": true, "hasPreviousPage": false, "searchWindowUsed": "PT1H" }
         """
-        guard case .done(let pageInfo)? = parsePlanStreamRecord(event: "pageInfo", data: data) else {
+        guard case .done(let done)? = parsePlanStreamRecord(event: "pageInfo", data: data) else {
             return XCTFail("expected done")
         }
-        XCTAssertEqual(pageInfo.startCursor, "c-prev")
-        XCTAssertEqual(pageInfo.endCursor, "c-next")
-        XCTAssertTrue(pageInfo.hasNextPage)
-        XCTAssertFalse(pageInfo.hasPreviousPage)
-        XCTAssertEqual(pageInfo.searchWindowUsed, "PT1H")
+        XCTAssertEqual(done.pageInfo.startCursor, "c-prev")
+        XCTAssertEqual(done.pageInfo.endCursor, "c-next")
+        XCTAssertTrue(done.pageInfo.hasNextPage)
+        XCTAssertFalse(done.pageInfo.hasPreviousPage)
+        XCTAssertEqual(done.pageInfo.searchWindowUsed, "PT1H")
+        XCTAssertEqual(done.routingErrors, [])
+    }
+
+    // Routing outcomes (a date outside the feed, an unknown stop) ride the terminal `pageInfo` frame, shaped
+    // like batch `routingErrors`, so the stream reports them as a result rather than a failure.
+    func testPageInfoCarriesRoutingErrors() {
+        let data = """
+        { "hasNextPage": false, "hasPreviousPage": false, "routingErrors": [
+          { "code": "LOCATION_NOT_FOUND", "inputField": "FROM", "description": "Origin stop not found" },
+          { "code": "OUTSIDE_SERVICE_PERIOD", "inputField": "DATE_TIME", "description": "Outside the feed" }
+        ] }
+        """
+        guard case .done(let done)? = parsePlanStreamRecord(event: "pageInfo", data: data) else {
+            return XCTFail("expected done")
+        }
+        XCTAssertEqual(done.routingErrors.map(\.code), [.locationNotFound, .outsideServicePeriod])
+        XCTAssertEqual(done.routingErrors.map(\.inputField), [.from, .dateTime])
+        XCTAssertEqual(done.routingErrors[0].description, "Origin stop not found")
     }
 
     // The server's terminal `done` telemetry frame is not surfaced — `pageInfo` already carried the cursors, so
@@ -169,5 +188,164 @@ final class RoutingStreamTests: XCTestCase {
         let actual = try streamVariablesJSON(variables)
         XCTAssertEqual(actual["before"] as? String, "c-prev")
         XCTAssertNil(actual["after"])
+    }
+
+    // MARK: end to end through the public entry point
+
+    override func setUp() {
+        super.setUp()
+        URLProtocol.registerClass(StubStreamProtocol.self)
+    }
+
+    override func tearDown() {
+        URLProtocol.unregisterClass(StubStreamProtocol.self)
+        super.tearDown()
+    }
+
+    private func collect(_ stream: AsyncStream<PlanStreamEvent>) async -> [PlanStreamEvent] {
+        var events: [PlanStreamEvent] = []
+        for await event in stream { events.append(event) }
+        return events
+    }
+
+    // `planStream` sends the caller's `targetResults` and `maxWindow` (both required, no SDK default) under the
+    // plan-stream id, and its terminal `.done` carries the routing errors.
+    func testPlanStreamSendsRequiredInputsAndEndsWithRoutingErrors() async throws {
+        StubStreamProtocol.respond(status: 200, body: """
+        event: chunk
+        data: {"results":[]}
+
+        event: pageInfo
+        data: {"hasNextPage":false,"hasPreviousPage":false,"routingErrors":[{"code":"OUTSIDE_SERVICE_PERIOD","inputField":"DATE_TIME","description":"Outside the feed"}]}
+
+        event: done
+        data: {"resultCount":0}
+
+
+        """)
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
+        let events = await collect(client.routing.planStream(options, targetResults: 3, maxWindowMinutes: 120))
+
+        let sent = try XCTUnwrap(StubStreamProtocol.requestBody)
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: sent) as? [String: Any])
+        XCTAssertEqual(body["id"] as? String, "40380fc4cf10397a4c20d039cc9428b73757c7fce0de2072ae1685a43efbfc15")
+        let variables = try XCTUnwrap(body["variables"] as? [String: Any])
+        XCTAssertEqual(variables["maxWindow"] as? String, "PT120M")
+        XCTAssertEqual(variables["targetResults"] as? Int, 3)
+
+        // One event per SSE record, in order: the blank line between records is what separates them.
+        guard events.count == 2, case .result = events[0], case .done(let done) = events[1] else {
+            return XCTFail("expected result then done, got \(events)")
+        }
+        XCTAssertEqual(done.routingErrors.map(\.code), [.outsideServicePeriod])
+    }
+
+    // A retired persisted-query id is refused by the gateway before the stream opens; the stream ends with the
+    // same `.queryRetired` failure the batch calls return.
+    func testPlanStreamRetiredQueryFailsWithQueryRetired() async throws {
+        StubStreamProtocol.respond(status: 410, contentType: "application/json", body: #"{"error":"query_retired","message":"persisted query is retired"}"#)
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
+        let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
+
+        guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
+        XCTAssertEqual(error.code, .queryRetired)
+        XCTAssertEqual(error.httpStatus, 410)
+        XCTAssertTrue(error.message.contains("persisted query is retired"))
+    }
+
+    // The gateway answers a missing required variable with a 200 JSON GraphQL error before any event; it maps
+    // like the batch path, to a bad request naming the field.
+    func testPlanStreamJSONErrorBodyFailsAsBadRequest() async throws {
+        StubStreamProtocol.respond(status: 200, contentType: "application/json", body: """
+        {"data":null,"errors":[{"message":"maxWindow is required","extensions":{"code":"BAD_REQUEST","field":"maxWindow"}}]}
+        """)
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
+        let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
+
+        guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
+        XCTAssertEqual(error.code, .badRequest)
+        XCTAssertEqual(error.field, "maxWindow")
+        XCTAssertEqual(error.message, "maxWindow is required")
+    }
+
+    // A window under the 2 h platform minimum, or a via location outside its fixed limits, fails before any request.
+    func testPlanStreamRejectsInputsOutsideFixedLimitsWithoutRequest() async throws {
+        StubStreamProtocol.respond(status: 200, body: "")
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
+        let viaOptions = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.passThrough(stopIds: [])])
+        let cases: [(AsyncStream<PlanStreamEvent>, String)] = [
+            (client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 119), "maxWindow"),
+            (client.routing.planStreamNext(options, targetResults: 5, maxWindowMinutes: 0, after: "c"), "maxWindow"),
+            (client.routing.planStreamPrevious(options, targetResults: 5, maxWindowMinutes: -120, before: "c"), "maxWindow"),
+            (client.routing.planStream(viaOptions, targetResults: 5, maxWindowMinutes: 120), "via"),
+        ]
+        for (stream, field) in cases {
+            let events = await collect(stream)
+            guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, field)
+            XCTAssertEqual(error.message, "\(field) is out of range")
+        }
+        XCTAssertNil(StubStreamProtocol.requestBody)
+    }
+}
+
+// Serves one canned response to `URLSession.shared` (which `planStream` streams through) for requests to `host`,
+// recording the request body, so the public stream entry points can be driven end to end.
+final class StubStreamProtocol: URLProtocol {
+    static let host = "stream.test"
+    private static let lock = NSLock()
+    private static var status = 200
+    private static var contentType = "text/event-stream"
+    private static var body = ""
+    private static var recordedBody: Data?
+
+    static func respond(status: Int, contentType: String = "text/event-stream", body: String) {
+        lock.lock(); defer { lock.unlock() }
+        self.status = status
+        self.contentType = contentType
+        self.body = body
+        recordedBody = nil
+    }
+
+    static var requestBody: Data? {
+        lock.lock(); defer { lock.unlock() }
+        return recordedBody
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == host }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let sent = request.httpBody ?? request.httpBodyStream.map(Self.readAll)
+        Self.lock.lock()
+        Self.recordedBody = sent
+        let status = Self.status
+        let contentType = Self.contentType
+        let body = Self.body
+        Self.lock.unlock()
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["content-type": contentType])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func readAll(_ stream: InputStream) -> Data {
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count <= 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
     }
 }

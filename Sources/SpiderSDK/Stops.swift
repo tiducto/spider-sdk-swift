@@ -1,9 +1,19 @@
 import Foundation
 
-/// A stop returned by search.
+/// A stop returned by search. A station's platforms are folded into it, so the station is returned instead.
 public struct Stop: Sendable, Equatable {
     public let gtfsId: String
     public let name: String
+    /// The short public code riders know the stop by (GTFS `stop_code`), when the feed has one.
+    public let code: String?
+    /// GTFS `location_type`: `0` a stop or platform, `1` a station. Nil means a stop.
+    public let locationType: Int?
+    /// Whether a rider in a wheelchair can board here (GTFS `wheelchair_boarding`). Nil = no information; a code
+    /// GTFS doesn't define is `.unknown`.
+    public let wheelchairBoarding: WheelchairBoarding?
+    /// The modes of the routes serving the stop (a station's cover all its platforms), each once. Empty when no
+    /// route serves it. A mode this SDK doesn't know is `.unknown`.
+    public let modes: [TransitMode]
     public let lat: Double?
     public let lon: Double?
     public let country: String?
@@ -37,8 +47,9 @@ public struct GeoBoundingBox: Sendable, Equatable {
     }
 }
 
-/// Search criteria. `name` is a free-text query; the admin fields narrow it by administrative area, and the
-/// geo fields narrow it by location. `radiusMeters` and `sortByDistance` both require `near`.
+/// Search criteria. `name` is free text matched against a stop's name, its code, its town (`city`) and the
+/// district within the town (`suburb`); the admin fields narrow it by administrative area, `modes` by the modes
+/// serving the stop, and the geo fields by location. `radiusMeters` and `sortByDistance` both require `near`.
 public struct StopFilter: Sendable {
     public var name: String?
     public var country: String?
@@ -46,6 +57,8 @@ public struct StopFilter: Sendable {
     public var district: String?
     public var city: String?
     public var suburb: String?
+    /// Restrict to stops served by at least one of these modes. Empty (the default) means any mode.
+    public var modes: [TransitMode]
     /// Geographic anchor for `radiusMeters` and `sortByDistance`.
     public var near: GeoPoint?
     /// Restrict to stops within this many metres of `near`. Requires `near`.
@@ -54,8 +67,9 @@ public struct StopFilter: Sendable {
     public var bbox: GeoBoundingBox?
     /// Sort results by distance from `near`, nearest first. Requires `near`.
     public var sortByDistance: Bool
-    /// Cap the number of hits returned.
-    public var limit: Int?
+    /// The most hits to return, from 1 to 50 (default 20). Outside that range the search fails as `.badRequest`
+    /// (field `limit`) without a request.
+    public var limit: Int
 
     public init(
         name: String? = nil,
@@ -64,11 +78,12 @@ public struct StopFilter: Sendable {
         district: String? = nil,
         city: String? = nil,
         suburb: String? = nil,
+        modes: [TransitMode] = [],
         near: GeoPoint? = nil,
         radiusMeters: Double? = nil,
         bbox: GeoBoundingBox? = nil,
         sortByDistance: Bool = false,
-        limit: Int? = nil
+        limit: Int = 20
     ) {
         self.name = name
         self.country = country
@@ -76,6 +91,7 @@ public struct StopFilter: Sendable {
         self.district = district
         self.city = city
         self.suburb = suburb
+        self.modes = modes
         self.near = near
         self.radiusMeters = radiusMeters
         self.bbox = bbox
@@ -83,6 +99,8 @@ public struct StopFilter: Sendable {
         self.limit = limit
     }
 }
+
+private let MAX_STOP_SEARCH_LIMIT = 50
 
 /// The stops surface: text + administrative-area stop search.
 public final class SpiderStops {
@@ -98,8 +116,6 @@ public final class SpiderStops {
             let body = try buildStopSearchRequest(filter)
             let response: StopSearchResponse = try await transport.postJson("/stops/search", body, errorMessage: extractStopError)
             return .success(response.hits.map(toStop))
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }
@@ -112,27 +128,26 @@ public final class SpiderStops {
             let body = StopSearchRequest(q: "", filter: "\"gtfsId\" = \"\(escapeFilter(gtfsId))\"", sort: nil, limit: 1)
             let response: StopSearchResponse = try await transport.postJson("/stops/search", body, errorMessage: extractStopError)
             return response.hits.first.map(toStop)
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             throw toSpiderError(error)
         }
     }
 
     /// Stops around a point, nearest first. Pass `radiusMeters` to bound the search.
-    public func near(_ lat: Double, _ lng: Double, radiusMeters: Double? = nil, limit: Int? = nil) async throws -> SpiderResult<[Stop]> {
+    public func near(_ lat: Double, _ lng: Double, radiusMeters: Double? = nil, limit: Int = 20) async throws -> SpiderResult<[Stop]> {
         try await search(StopFilter(near: GeoPoint(lat: lat, lng: lng), radiusMeters: radiusMeters, sortByDistance: true, limit: limit))
     }
 
     /// Stops inside a bounding box.
-    public func within(_ bbox: GeoBoundingBox, limit: Int? = nil) async throws -> SpiderResult<[Stop]> {
+    public func within(_ bbox: GeoBoundingBox, limit: Int = 20) async throws -> SpiderResult<[Stop]> {
         try await search(StopFilter(bbox: bbox, limit: limit))
     }
 }
 
-// Builds the wire request, validating that the geo options that need an anchor have one, and adding the
-// distance sort when requested.
+// Builds the wire request, validating the limit and that the geo options that need an anchor have one, and
+// adding the distance sort when requested.
 private func buildStopSearchRequest(_ filter: StopFilter) throws -> StopSearchRequest {
+    guard (1...MAX_STOP_SEARCH_LIMIT).contains(filter.limit) else { throw outOfRange("limit") }
     if filter.radiusMeters != nil && filter.near == nil {
         throw SpiderError(code: .unknown, message: "stops.search: `radiusMeters` requires `near`")
     }
@@ -159,6 +174,10 @@ private func buildFilterExpression(_ filter: StopFilter) -> String? {
     for (key, value) in pairs {
         guard let value, !value.isEmpty else { continue }
         clauses.append("\"\(escapeFilter(key))\" = \"\(escapeFilter(value))\"")
+    }
+    if !filter.modes.isEmpty {
+        let values = filter.modes.map { "\"\(escapeFilter($0.rawValue))\"" }.joined(separator: ", ")
+        clauses.append("\"modes\" IN [\(values)]")
     }
     if let radius = filter.radiusMeters, let near = filter.near {
         clauses.append("_geoRadius(\(near.lat), \(near.lng), \(radius))")
@@ -187,9 +206,22 @@ private func extractStopError(_ text: String) -> String {
 
 private func toStop(_ hit: StopHit) -> Stop {
     Stop(
-        gtfsId: hit.gtfsId, name: hit.name, lat: hit.lat, lon: hit.lon,
+        gtfsId: hit.gtfsId, name: hit.name, code: hit.code, locationType: hit.locationType,
+        wheelchairBoarding: wheelchairBoarding(gtfs: hit.wheelchairBoarding),
+        modes: (hit.modes ?? []).map { TransitMode(rawValue: $0) ?? .unknown }, lat: hit.lat, lon: hit.lon,
         country: hit.country, region: hit.region, district: hit.district, city: hit.city, suburb: hit.suburb
     )
+}
+
+// GTFS `wheelchair_boarding` codes onto the routing enum: 0 or absent is no information, 1 possible, 2 not
+// possible, and a code GTFS doesn't define is `.unknown`.
+private func wheelchairBoarding(gtfs code: Int?) -> WheelchairBoarding? {
+    switch code {
+    case nil, 0: return nil
+    case 1: return .possible
+    case 2: return .notPossible
+    default: return .unknown
+    }
 }
 
 // MARK: - wire types (hand-written, mirroring the TS SDK; not generated)
@@ -198,7 +230,7 @@ private struct StopSearchRequest: Encodable {
     let q: String
     let filter: String?
     let sort: [String]?
-    let limit: Int?
+    let limit: Int
 }
 
 private struct StopSearchResponse: Decodable {
@@ -209,6 +241,10 @@ private struct StopSearchResponse: Decodable {
 private struct StopHit: Decodable {
     let gtfsId: String
     let name: String
+    let code: String?
+    let locationType: Int?
+    let wheelchairBoarding: Int?
+    let modes: [String]?
     let lat: Double?
     let lon: Double?
     let country: String?

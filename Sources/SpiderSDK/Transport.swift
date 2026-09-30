@@ -45,15 +45,25 @@ private struct GraphQLEnvelope<D: Decodable>: Decodable {
     let errors: [GraphQLEnvelopeError]?
 }
 
-private struct GraphQLEnvelopeError: Decodable {
+struct GraphQLEnvelopeError: Decodable {
     let message: String
     // Present on validation failures the gateway/router stamp; code == "BAD_REQUEST" + the offending field.
     let extensions: GraphQLErrorExtensions?
 }
 
-private struct GraphQLErrorExtensions: Decodable {
+struct GraphQLErrorExtensions: Decodable {
     let code: String?
     let field: String?
+}
+
+// Top-level GraphQL errors as a transport error: a BAD_REQUEST extension maps to typed badRequest (with its
+// field); anything else stays a generic upstream. Shared by batch calls and the plan stream.
+func graphQLErrorsError(_ errors: [GraphQLEnvelopeError], path: String) -> TransportError {
+    if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
+        return TransportError(.badRequest, bad.message, field: bad.extensions?.field)
+    }
+    let joined = errors.map { $0.message }.joined(separator: ", ")
+    return TransportError(.upstream, "routing \(path) errors: \(joined)")
 }
 
 struct RawResponse {
@@ -64,8 +74,8 @@ struct RawResponse {
 }
 
 /// Translates SDK calls into HTTP against the gateway: builds identity headers, applies the persisted-query
-/// body shape, checks the contract-version response header, and runs the retry/backoff loop. Internal —
-/// consumers reach it only through the surface classes on `SpiderClient`.
+/// body shape, and runs the retry/backoff loop. Internal — consumers reach it only through the surface classes
+/// on `SpiderClient`.
 final class Transport {
     private let baseURL: String
     private let apiKey: String
@@ -111,21 +121,12 @@ final class Transport {
         let body = try JSONEncoder().encode(PersistedRequest(id: op.id, variables: variables))
         let req = request(url: url, method: "POST", body: body, json: true)
         let (data, response) = try await send(req)
-        try checkContract(response.value(forHTTPHeaderField: CONTRACT_HEADER))
         if !(200..<300).contains(response.statusCode) {
-            let text = String(data: data, encoding: .utf8) ?? ""
-            let env = parseErrorEnvelope(text)
-            let detail = env.message ?? String(text.prefix(300))
-            throw TransportError(.http, "routing \(op.path) -> \(response.statusCode): \(detail)", httpStatus: response.statusCode, serverCode: env.code)
+            throw routingHTTPError(op.path, status: response.statusCode, body: String(data: data, encoding: .utf8) ?? "")
         }
         let envelope: GraphQLEnvelope<D> = try decode(from: data, where: "routing \(op.path)")
         if let errors = envelope.errors, !errors.isEmpty {
-            // A BAD_REQUEST extension maps to typed badRequest; anything else stays a generic upstream.
-            if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
-                throw TransportError(.badRequest, bad.message, field: bad.extensions?.field)
-            }
-            let joined = errors.map { $0.message }.joined(separator: ", ")
-            throw TransportError(.upstream, "routing \(op.path) errors: \(joined)")
+            throw graphQLErrorsError(errors, path: op.path)
         }
         guard let payload = envelope.data else {
             throw TransportError(.noData, "routing \(op.path) returned no data")
@@ -157,12 +158,11 @@ final class Transport {
         let data = try JSONEncoder().encode(body)
         let req = request(url: url, method: "POST", body: data, json: true)
         let (respData, response) = try await send(req)
-        try checkContract(response.value(forHTTPHeaderField: CONTRACT_HEADER))
         if !(200..<300).contains(response.statusCode) {
             let text = String(data: respData, encoding: .utf8) ?? ""
             let env = parseErrorEnvelope(text)
             let message = errorMessage?(text) ?? env.message ?? String(text.prefix(300))
-            throw TransportError(.http, "POST \(path) -> \(response.statusCode): \(message)", httpStatus: response.statusCode, serverCode: env.code)
+            throw TransportError(.http, "POST \(path) -> \(response.statusCode): \(message)", httpStatus: response.statusCode, serverCode: env.code, field: validationField(message))
         }
         return try decode(from: respData, where: "POST \(path)")
     }
@@ -172,7 +172,7 @@ final class Transport {
         if !raw.ok {
             let env = parseErrorEnvelope(raw.text)
             let detail = env.message ?? String(raw.text.prefix(300))
-            throw TransportError(.http, "GET \(path) -> \(raw.status): \(detail)", httpStatus: raw.status, serverCode: env.code)
+            throw TransportError(.http, "GET \(path) -> \(raw.status): \(detail)", httpStatus: raw.status, serverCode: env.code, field: validationField(detail))
         }
         return try decode(from: raw.data, where: "GET \(path)")
     }
@@ -189,7 +189,6 @@ final class Transport {
         }
         let req = request(url: url, method: "GET", body: nil, json: false)
         let (data, response) = try await send(req)
-        try checkContract(response.value(forHTTPHeaderField: CONTRACT_HEADER))
         return RawResponse(ok: (200..<300).contains(response.statusCode), status: response.statusCode, data: data)
     }
 
@@ -205,7 +204,7 @@ final class Transport {
         if let url = URL(string: "\(baseURL)/ping") {
             // apikey comes from the Transport's shared request-builder; no contract/sdk headers here.
             let req = makeRequest(url: url, method: "GET")
-            // No retry, no contract check: a single fire-and-forget probe whose only job is the connection.
+            // No retry: a single fire-and-forget probe whose only job is the connection.
             do {
                 _ = try await config.httpClient.send(req)
             } catch {

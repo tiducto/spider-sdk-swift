@@ -9,6 +9,8 @@ public enum SpiderErrorCode: String, Sendable {
     case notFound = "not_found"
     case server
     case rateLimited = "rate_limited"
+    /// The persisted routing query behind the call is retired: the API no longer serves it (HTTP 410).
+    case queryRetired = "query_retired"
     case decoding
     case unknown
 }
@@ -21,10 +23,11 @@ public struct SpiderError: Error {
     public let message: String
     /// The HTTP status, when the failure came from an HTTP response.
     public let httpStatus: Int?
-    /// The machine-readable `code` from a server JSON error envelope, when present.
+    /// The machine-readable `code` from a server JSON error envelope, when present: e.g. `query_retired` on a
+    /// `.queryRetired`, or `persisted_query_rejected` (HTTP 403) when the gateway doesn't know the query id.
     public let serverCode: String?
-    /// For a `badRequest` (a server validation failure — over-cap `searchWindow`, malformed `via`, or a
-    /// missing required field), the offending input field when the server names one. Nil otherwise.
+    /// For a `badRequest` (a missing, out-of-range or invalid value, rejected by the SDK before sending or by the
+    /// server), the offending input's wire name when one is named. Nil otherwise.
     public let field: String?
     /// The underlying error, when one caused this failure.
     public let cause: Error?
@@ -43,23 +46,6 @@ extension SpiderError: CustomStringConvertible {
     public var description: String { "SpiderError(\(code.rawValue): \(message))" }
 }
 
-/// Thrown (never returned) when the gateway declares a different MAJOR contract version than this SDK speaks.
-/// It escapes the `SpiderResult` channel on purpose: a major mismatch is a hard, programmer-visible failure.
-public struct SpiderContractMismatchError: Error, CustomStringConvertible {
-    public let expected: String
-    public let actual: String
-
-    public init(expected: String, actual: String) {
-        self.expected = expected
-        self.actual = actual
-    }
-
-    public var message: String {
-        "Spider contract mismatch: this SDK speaks \(expected) but the gateway declared \(actual)"
-    }
-    public var description: String { message }
-}
-
 // MARK: - Internal transport errors (mapped to SpiderError by `toSpiderError`)
 
 enum TransportErrorKind {
@@ -74,7 +60,8 @@ struct TransportError: Error {
     let message: String
     let httpStatus: Int?
     let serverCode: String?
-    // Set only for `.badRequest`: the offending input field the server named, if any.
+    // The offending input field the server named, if any: from a BAD_REQUEST extension, or from an HTTP error
+    // message of the fixed `<field> is …` shape.
     let field: String?
 
     init(_ kind: TransportErrorKind, _ message: String, httpStatus: Int? = nil, serverCode: String? = nil, field: String? = nil) {
@@ -92,17 +79,59 @@ struct SpiderDecodingError: Error {
 }
 
 /// A parsed server error envelope: a stable machine `code` and a human `message`, either possibly absent.
+/// `error` is the gateway's own rejection kind (e.g. `persisted_query_rejected`), which it sends instead of `code`.
 struct ErrorEnvelope {
     let code: String?
     let message: String?
+    let error: String?
 }
 
 func parseErrorEnvelope(_ text: String) -> ErrorEnvelope {
     guard let data = text.data(using: .utf8),
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        return ErrorEnvelope(code: nil, message: nil)
+        return ErrorEnvelope(code: nil, message: nil, error: nil)
     }
-    return ErrorEnvelope(code: obj["code"] as? String, message: obj["message"] as? String)
+    return ErrorEnvelope(code: obj["code"] as? String, message: obj["message"] as? String, error: obj["error"] as? String)
+}
+
+let PERSISTED_QUERY_REJECTED = "persisted_query_rejected"
+let QUERY_RETIRED = "query_retired"
+
+// A routing non-2xx as a transport error. The gateway names its own rejections in `error`: `query_retired`
+// (HTTP 410, also the fallback when the body is unreadable) and `persisted_query_rejected` (403, an id it never had).
+func routingHTTPError(_ path: String, status: Int, body: String) -> TransportError {
+    let env = parseErrorEnvelope(body)
+    if env.error == QUERY_RETIRED || status == 410 {
+        return TransportError(.http, "routing \(path) -> \(status): persisted query is retired", httpStatus: status, serverCode: QUERY_RETIRED)
+    }
+    let detail = env.message ?? String(body.prefix(300))
+    let serverCode = env.error == PERSISTED_QUERY_REJECTED ? PERSISTED_QUERY_REJECTED : env.code
+    return TransportError(.http, "routing \(path) -> \(status): \(detail)", httpStatus: status, serverCode: serverCode, field: validationField(detail))
+}
+
+private let VALIDATION_PROBLEMS = [" is out of range", " is required", " is invalid"]
+
+// The field a server validation message names, when the message has the fixed `<field> is out of range`,
+// `<field> is required` or `<field> is invalid` shape. Nil for any other message.
+func validationField(_ message: String) -> String? {
+    let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    for problem in VALIDATION_PROBLEMS where text.hasSuffix(problem) {
+        let field = text.dropLast(problem.count)
+        guard let first = field.first, first.isASCII, first.isLetter || first == "_",
+              field.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }) else { return nil }
+        return String(field)
+    }
+    return nil
+}
+
+// The typed failures for an input the SDK rejects before any request is sent. They name only the field, never
+// the limit or the value.
+func outOfRange(_ field: String) -> SpiderError {
+    SpiderError(code: .badRequest, message: "\(field) is out of range", field: field)
+}
+
+func invalid(_ field: String) -> SpiderError {
+    SpiderError(code: .badRequest, message: "\(field) is invalid", field: field)
 }
 
 /// Maps any thrown error into the public `SpiderError` taxonomy. Mirrors the TS SDK's `toSpiderError`.
@@ -114,6 +143,9 @@ func toSpiderError(_ error: Error) -> SpiderError {
             let status = te.httpStatus ?? 0
             let code: SpiderErrorCode
             switch status {
+            case _ where te.serverCode == QUERY_RETIRED: code = .queryRetired
+            // Realtime and stop search answer an invalid input with a plain 400 naming the field.
+            case 400: code = .badRequest
             case 401, 403: code = .unauthorized
             case 404: code = .notFound
             case 408, 504: code = .timeout
@@ -121,7 +153,7 @@ func toSpiderError(_ error: Error) -> SpiderError {
             case 500...599: code = .server
             default: code = .unknown
             }
-            return SpiderError(code: code, message: te.message, httpStatus: status, serverCode: te.serverCode)
+            return SpiderError(code: code, message: te.message, httpStatus: status, serverCode: te.serverCode, field: code == .badRequest ? te.field : nil)
         case .noData:
             return SpiderError(code: .notFound, message: te.message)
         case .badRequest:

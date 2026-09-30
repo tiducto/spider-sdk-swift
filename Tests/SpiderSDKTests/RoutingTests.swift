@@ -9,9 +9,9 @@ final class RoutingTests: XCTestCase {
         "legs":[{
           "start":{"scheduledTime":"2026-08-21T10:00:00Z"},
           "end":{"scheduledTime":"2026-08-21T10:15:00Z"},
-          "from":{"name":"A","stop":{"gtfsId":"S1","wheelchairBoarding":"POSSIBLE"}},
-          "to":{"name":"B","stop":{"gtfsId":"S2","wheelchairBoarding":"NOT_POSSIBLE"}},
-          "mode":"BUS","route":{"shortName":"12","longName":"Line 12"},"headsign":"Downtown",
+          "from":{"name":"A","stop":{"gtfsId":"S1","wheelchairBoarding":"POSSIBLE","platformCode":"3","zoneId":"P"}},
+          "to":{"name":"B","stop":{"gtfsId":"S2","wheelchairBoarding":"NOT_POSSIBLE","platformCode":"B","zoneId":"0"}},
+          "mode":"BUS","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","color":"FF0000","textColor":"FFFFFF"},"headsign":"Downtown",
           "distance":1500.0,"duration":900.0,"accessibilityScore":1.0,
           "trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED"},
           "legGeometry":{"points":"_p~iF~ps|U_ulLnnqC_mqNvxq`@"}
@@ -40,6 +40,14 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(leg.toWheelchair, .notPossible)
         XCTAssertEqual(leg.bikesAllowed, .allowed)
         XCTAssertEqual(leg.geometry.count, 3) // decoded polyline
+        // Display fields pass through raw; colours stay GTFS hex without '#'.
+        XCTAssertEqual(leg.routeGtfsId, "1:R12")
+        XCTAssertEqual(leg.routeColor, "FF0000")
+        XCTAssertEqual(leg.routeTextColor, "FFFFFF")
+        XCTAssertEqual(leg.fromPlatformCode, "3")
+        XCTAssertEqual(leg.toPlatformCode, "B")
+        XCTAssertEqual(leg.fromZoneId, "P")
+        XCTAssertEqual(leg.toZoneId, "0")
         XCTAssertTrue(route.pageInfo.hasNextPage)
 
         // Request: URL, method, headers, persisted-query body.
@@ -50,7 +58,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "0.7")
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/0.7.1")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
-        XCTAssertEqual(req.bodyJSON["id"] as? String, "06004d101213f2d6abbbde9e7ed3fd239af47352168d5fd47ece8c46cab67618")
+        XCTAssertEqual(req.bodyJSON["id"] as? String, "679549e87f9653ff7a5a021c0b329a2c9658d4701c836139e63712dd9b77981f")
         let vars = req.bodyJSON["variables"] as! [String: Any]
         XCTAssertNil(vars["first"])
         XCTAssertNil(vars["last"])
@@ -98,6 +106,91 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(maxTransfers, 3)
         let enabled = ((prefs["accessibility"] as! [String: Any])["wheelchair"] as! [String: Any])["enabled"] as? Bool
         XCTAssertEqual(enabled, true)
+    }
+
+    // The window is sent as given: the server, not the SDK, rejects a window outside the environment's range.
+    func testPlanSendsSearchWindowUnclamped() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        _ = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), searchWindowMinutes: 0))
+        let vars = mock.requests[0].bodyJSON["variables"] as! [String: Any]
+        XCTAssertEqual(vars["searchWindow"] as? String, "PT0M")
+    }
+
+    // Stop ids per via location (1-10) and a visit's wait (0-24 h) are fixed platform limits, checked before sending.
+    func testPlanRejectsViaOutsideFixedLimitsWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let eleven = (1...11).map { "1:V\($0)" }
+        let invalid: [ViaLocation] = [
+            .passThrough(stopIds: []),
+            .passThrough(stopIds: eleven),
+            .visit(.stop("1:V"), minimumWaitSeconds: -1),
+            .visit(.stop("1:V"), minimumWaitSeconds: 86_401),
+        ]
+        for via in invalid {
+            let result = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), via: [via]))
+            guard case .failure(let error) = result else { return XCTFail("expected failure for \(via)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, "via")
+            XCTAssertEqual(error.message, "via is out of range")
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
+
+    func testPlanSendsViaAtItsFixedLimits() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let ten = (1...10).map { "1:V\($0)" }
+        let result = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"),
+            via: [.passThrough(stopIds: ten), .visit(.stop("1:W"), minimumWaitSeconds: 86_400)]
+        ))
+        XCTAssertTrue(result.isSuccess)
+        let via = (mock.requests[0].bodyJSON["variables"] as! [String: Any])["via"] as! [[String: Any]]
+        XCTAssertEqual((via[0]["passThrough"] as! [String: Any])["stopLocationIds"] as? [String], ten)
+        XCTAssertEqual((via[1]["visit"] as! [String: Any])["minimumWaitTime"] as? String, "PT86400S")
+    }
+
+    // Wire values this SDK doesn't know decode to `.unknown`; an unknown via stop is a VIA routing error.
+    func testPlanMapsUnknownEnumValuesAndViaLocationNotFound() async throws {
+        let body = """
+        {"data":{"planConnection":{
+          "edges":[{"cursor":"c1","node":{"duration":60,"numberOfTransfers":0,"legs":[{
+            "start":{"scheduledTime":"2026-08-21T10:00:00Z"},"end":{"scheduledTime":"2026-08-21T10:01:00Z"},
+            "from":{"name":"A"},"to":{"name":"B"},"mode":"HOVERCRAFT","realtimeState":"TELEPORTED"
+          }]}}],
+          "pageInfo":{"hasNextPage":false,"hasPreviousPage":false},
+          "routingErrors":[
+            {"code":"LOCATION_NOT_FOUND","inputField":"VIA","description":"Via stop not found"},
+            {"code":"SOMETHING_NEW","inputField":"SOMEWHERE_NEW","description":"New"}
+          ]
+        }}}
+        """
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let route) = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))) else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(route.routingErrors.map(\.code), [.locationNotFound, .unknown])
+        XCTAssertEqual(route.routingErrors.map(\.inputField), [.via, .unknown])
+        let leg = route.edges[0].itinerary.legs[0]
+        XCTAssertEqual(leg.mode, .unknown)
+        XCTAssertEqual(leg.realtimeState, .unknown)
+        // A leg with no route or stops (a walk) has no display fields.
+        XCTAssertNil(leg.routeGtfsId)
+        XCTAssertNil(leg.routeColor)
+        XCTAssertNil(leg.routeTextColor)
+        XCTAssertNil(leg.fromPlatformCode)
+        XCTAssertNil(leg.toPlatformCode)
+        XCTAssertNil(leg.fromZoneId)
+        XCTAssertNil(leg.toZoneId)
+    }
+
+    // A non-2xx routing answer whose message has the fixed `<field> is …` shape names that field.
+    func testRouting400IsBadRequestWithField() async throws {
+        let (client, _) = makeClient { _ in json(#"{"message":"searchWindow is out of range"}"#, status: 400) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .badRequest)
+        XCTAssertEqual(error.httpStatus, 400)
+        XCTAssertEqual(error.field, "searchWindow")
     }
 
     func testPlanArriveBySetsLatestArrival() async throws {
@@ -162,52 +255,177 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(error.message, "searchWindow exceeds the maximum of PT2H")
     }
 
-    func testContractMismatchThrowsInsteadOfReturning() async throws {
+    // The contract-version response header is informational: a gateway declaring another major still answers.
+    func testOtherContractMajorOnResponseIsIgnored() async throws {
         let (client, _) = makeClient { _ in json(self.planBody, contractVersion: "4.0") }
-        do {
-            _ = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
-            XCTFail("expected throw")
-        } catch let error as SpiderContractMismatchError {
-            XCTAssertEqual(error.expected, "0.7")
-            XCTAssertEqual(error.actual, "4.0")
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .success(let route) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(route.edges.count, 1)
+    }
+
+    // The gateway's 410 for a retired query id is its own error, stating the query's state.
+    func testRetiredQueryMapsToQueryRetired() async throws {
+        let body = #"{"error":"query_retired","message":"persisted query is retired"}"#
+        let (client, _) = makeClient { _ in json(body, status: 410) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .queryRetired)
+        XCTAssertEqual(error.code.rawValue, "query_retired")
+        XCTAssertEqual(error.httpStatus, 410)
+        XCTAssertEqual(error.serverCode, "query_retired")
+        XCTAssertTrue(error.message.contains("persisted query is retired"))
+        for action in ["update", "upgrade", "retry"] {
+            XCTAssertFalse(error.message.lowercased().contains(action))
         }
     }
 
-    func testDeparturesMapsAndDropsSiblingTerminatingTrips() async throws {
+    func testBare410IsQueryRetired() async throws {
+        let (client, _) = makeClient { _ in json("", status: 410) }
+        let result = try await client.routing.departures("S")
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .queryRetired)
+        XCTAssertTrue(error.message.contains("persisted query is retired"))
+    }
+
+    // An id the gateway never had stays an unauthorized 403, carrying the gateway's own message.
+    func testUnknownPersistedQueryIdStaysUnauthorized() async throws {
+        let body = #"{"error":"persisted_query_rejected","message":"unknown persisted-query id: abc"}"#
+        let (client, _) = makeClient { _ in json(body, status: 403) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .unauthorized)
+        XCTAssertEqual(error.httpStatus, 403)
+        XCTAssertEqual(error.serverCode, "persisted_query_rejected")
+        XCTAssertTrue(error.message.contains("unknown persisted-query id"))
+        XCTAssertFalse(error.message.lowercased().contains("update"))
+    }
+
+    // A 403 without the gateway's persisted-query marker (a key not accepted here) keeps the plain key message.
+    func testOtherForbiddenStaysAKeyProblem() async throws {
+        let (client, _) = makeClient { _ in json(#"{"error":"Access to this API has been disallowed"}"#, status: 403) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .unauthorized)
+        XCTAssertNil(error.serverCode)
+        XCTAssertFalse(error.message.contains("update the SDK"))
+    }
+
+    // Every boardable row is kept, including one whose headsign matches the stop name (the router, not the SDK,
+    // drops a trip's arrival-only terminus).
+    func testDeparturesMapsEveryRowWithServiceDate() async throws {
         let body = """
         {"data":{"asStop":{"gtfsId":"S","name":"Main Square","wheelchairBoarding":"POSSIBLE","stoptimesWithoutPatterns":[
-          {"serviceDay":1700000000,"scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","headsign":"Airport","trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","route":{"shortName":"12","longName":"Line 12","mode":"BUS"}}},
-          {"serviceDay":1700000000,"scheduledDeparture":36300,"realtime":false,"headsign":"main square","trip":{"gtfsId":"T2","route":{"shortName":"5","mode":"TRAM"}}}
+          {"serviceDay":1700000000,"scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","headsign":"Airport","stop":{"gtfsId":"S:P2","platformCode":"2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"00A0E0","textColor":"000000"}}},
+          {"serviceDay":1700000000,"scheduledDeparture":36300,"realtime":false,"headsign":"main square","trip":{"gtfsId":"T2","wheelchairAccessible":"NO_INFORMATION","route":{"gtfsId":"1:R5","shortName":"5","mode":"TRAM"}}}
         ]}}}
         """
         let (client, mock) = makeClient { _ in json(body) }
         let result = try await client.routing.departures("S", numberOfDepartures: 10)
         guard case .success(let departures) = result else { return XCTFail("expected success") }
-        XCTAssertEqual(departures.count, 1) // second dropped: headsign == stop name (case-insensitive)
+        XCTAssertEqual(departures.map(\.tripGtfsId), ["T1", "T2"])
         let d = departures[0]
+        XCTAssertEqual(d.serviceDate, "2023-11-15")
         XCTAssertEqual(d.scheduledTimeEpochMs, (1_700_000_000 + 36_000) * 1000)
         XCTAssertEqual(d.realtimeTimeEpochMs, (1_700_000_000 + 36_060) * 1000)
         XCTAssertEqual(d.mode, .bus)
         XCTAssertEqual(d.realtimeState, .updated)
         XCTAssertTrue(d.isRealtime)
+        XCTAssertEqual(d.routeGtfsId, "1:R12")
+        XCTAssertEqual(d.routeColor, "00A0E0")
+        XCTAssertEqual(d.routeTextColor, "000000")
+        XCTAssertEqual(d.stopGtfsId, "S:P2")
+        XCTAssertEqual(d.platformCode, "2")
+        XCTAssertEqual(d.wheelchairAccessible, .possible)
+        // Absent display fields stay nil; NO_INFORMATION is nil.
+        let bare = departures[1]
+        XCTAssertEqual(bare.routeGtfsId, "1:R5")
+        XCTAssertNil(bare.routeColor)
+        XCTAssertNil(bare.routeTextColor)
+        XCTAssertNil(bare.stopGtfsId)
+        XCTAssertNil(bare.platformCode)
+        XCTAssertNil(bare.wheelchairAccessible)
         let vars = mock.requests[0].bodyJSON["variables"] as! [String: Any]
         XCTAssertEqual(vars["numberOfDepartures"] as? Int, 10)
     }
 
-    func testTripMapsStopsGeometryAndEnums() async throws {
+    // Both limited inputs are required on the wire, so the SDK always sends them: 30 departures within 24 h.
+    func testDeparturesAlwaysSendsCountAndTimeRange() async throws {
+        let (client, mock) = makeClient { _ in json(#"{"data":{"asStop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[]}}}"#) }
+        _ = try await client.routing.departures("S")
+        let body = mock.requests[0].bodyJSON
+        XCTAssertEqual(body["id"] as? String, "e4ae3f49e06982173b38e945c3c02ef113be05e12564145faeade7758295f536")
+        let vars = body["variables"] as! [String: Any]
+        XCTAssertEqual(vars["numberOfDepartures"] as? Int, 30)
+        XCTAssertEqual(vars["timeRange"] as? Int, 86_400)
+        XCTAssertNil(vars["startTime"])
+
+        _ = try await client.routing.departures("S", timeRangeSeconds: 1)
+        XCTAssertEqual((mock.requests[1].bodyJSON["variables"] as! [String: Any])["timeRange"] as? Int, 1)
+    }
+
+    func testDeparturesRejectsTimeRangeOutOfRangeWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        for bad in [0, -60, 86_401] {
+            let result = try await client.routing.departures("S", timeRangeSeconds: bad)
+            guard case .failure(let error) = result else { return XCTFail("expected failure for \(bad)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, "timeRange")
+            XCTAssertEqual(error.message, "timeRange is out of range")
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
+
+    // A night departure past midnight belongs to the previous service date: serviceDay is 2026-09-28's
+    // noon-minus-12h in Europe/Prague (22:00Z on the 27th), and 24:40 is 00:40 on the 29th local time.
+    func testNightDepartureKeepsItsServiceDate() async throws {
         let body = """
-        {"data":{"trip":{"gtfsId":"T1","directionId":"0","tripHeadsign":"Airport","bikesAllowed":"NOT_ALLOWED","route":{"shortName":"12","longName":"Line 12","mode":"BUS"},"stoptimesForDate":[
-          {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE"}}
-        ],"tripGeometry":{"points":"_p~iF~ps|U","length":2}}}}
+        {"data":{"asStop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[
+          {"serviceDay":1790546400,"scheduledDeparture":88800,"headsign":"Depot","trip":{"gtfsId":"N1","route":{"gtfsId":"1:N90","shortName":"N90","mode":"BUS"}}}
+        ]}}}
         """
         let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let departures) = try await client.routing.departures("S") else { return XCTFail("expected success") }
+        XCTAssertEqual(departures[0].serviceDate, "2026-09-28")
+    }
+
+    func testTripRejectsMalformedServiceDateWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        for bad in ["20260921", "2026-09-31", "21-09-2026", "2026-09-21T00:00:00Z"] {
+            let result = try await client.routing.trip("T1", serviceDate: bad)
+            guard case .failure(let error) = result else { return XCTFail("expected failure for \(bad)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, "serviceDate")
+            XCTAssertEqual(error.message, "serviceDate is invalid")
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
+
+    func testTripMapsStopsGeometryAndEnums() async throws {
+        let body = """
+        {"data":{"trip":{"gtfsId":"T1","directionId":"0","tripHeadsign":"Airport","bikesAllowed":"NOT_ALLOWED","wheelchairAccessible":"NOT_POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"FF0000","textColor":"FFFFFF"},"stoptimesForDate":[
+          {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE","platformCode":"1","zoneId":"P"}},
+          {"serviceDay":1700000000,"scheduledArrival":36600,"stop":{"gtfsId":"S2","name":"B"}}
+        ],"tripGeometry":{"points":"_p~iF~ps|U","length":2}}}}
+        """
+        let (client, mock) = makeClient { _ in json(body) }
         let result = try await client.routing.trip("T1", serviceDate: "2026-08-21")
         guard case .success(let trip) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(mock.requests[0].bodyJSON["id"] as? String, "4a10717f45697a241a0843902808cd696eb8ffd102e93238bf753f865d939a3f")
         XCTAssertEqual(trip.mode, .bus)
         XCTAssertEqual(trip.bikesAllowed, .notAllowed)
-        XCTAssertEqual(trip.stops.count, 1)
+        XCTAssertEqual(trip.serviceDate, "2023-11-15")
+        XCTAssertEqual(trip.routeGtfsId, "1:R12")
+        XCTAssertEqual(trip.routeColor, "FF0000")
+        XCTAssertEqual(trip.routeTextColor, "FFFFFF")
+        XCTAssertEqual(trip.wheelchairAccessible, .notPossible)
+        XCTAssertEqual(trip.stops.count, 2)
         XCTAssertEqual(trip.stops[0].scheduledArrivalEpochMs, (1_700_000_000 + 36_000) * 1000)
         XCTAssertEqual(trip.stops[0].wheelchairBoarding, .possible)
+        XCTAssertEqual(trip.stops[0].platformCode, "1")
+        XCTAssertEqual(trip.stops[0].zoneId, "P")
+        XCTAssertNil(trip.stops[1].platformCode)
+        XCTAssertNil(trip.stops[1].zoneId)
+        XCTAssertNil(trip.stops[1].wheelchairBoarding)
         XCTAssertEqual(trip.geometry.count, 1)
     }
 }

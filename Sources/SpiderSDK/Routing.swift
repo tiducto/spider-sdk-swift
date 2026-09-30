@@ -10,8 +10,9 @@ public struct Leg: Sendable, Equatable {
     public let endScheduled: String
     // Realtime-estimated start/end times (ISO-8601) and the schedule deviation in seconds (positive = late,
     // negative = early), present when the trip is tracked. `isRealtime` is true when this leg carries live
-    // data; `serviceDate` is the GTFS service date (`YYYYMMDD`) the trip runs on — pass it to
-    // `SpiderRealtime.delays`, don't derive one from a clock time (GTFS times can exceed 24:00).
+    // data; `serviceDate` is the GTFS service date (`YYYY-MM-DD`) the trip runs on — pass it to
+    // `SpiderRouting.trip` and `SpiderRealtime.delays`, don't derive one from a clock time (GTFS times can
+    // exceed 24:00).
     public let startEstimated: String?
     public let endEstimated: String?
     public let startDelaySeconds: Int?
@@ -23,8 +24,21 @@ public struct Leg: Sendable, Equatable {
     public let toName: String?
     public let fromGtfsId: String?
     public let toGtfsId: String?
+    /// The platform (GTFS `platform_code`) the leg boards at / alights at, when the feed has one.
+    public let fromPlatformCode: String?
+    public let toPlatformCode: String?
+    /// The fare zone (GTFS `zone_id`) of the boarding / alighting stop, when the feed has one.
+    public let fromZoneId: String?
+    public let toZoneId: String?
+    public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
+    /// The route's colour: raw GTFS hex without `#` (e.g. `"FF0000"`), passed through as the feed gives it.
+    /// Nil when the feed has none.
+    public let routeColor: String?
+    /// The colour of text drawn on `routeColor`: raw GTFS hex without `#` (e.g. `"FFFFFF"`). Nil when the feed
+    /// has none.
+    public let routeTextColor: String?
     public let headsign: String?
     public let distanceMeters: Double?
     public let durationSeconds: Double?
@@ -87,9 +101,25 @@ public struct Departure: Sendable, Equatable {
     public let realtimeState: RealtimeState?
     public let headsign: String?
     public let tripGtfsId: String?
+    /// The GTFS service date (`YYYY-MM-DD`) this departure's trip runs on — the previous day for a night
+    /// departure past midnight. Pass it with `tripGtfsId` to `SpiderRouting.trip` and `SpiderRealtime.delays`.
+    public let serviceDate: String
+    public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
+    /// The route's colour: raw GTFS hex without `#` (e.g. `"FF0000"`), passed through as the feed gives it.
+    /// Nil when the feed has none.
+    public let routeColor: String?
+    /// The colour of text drawn on `routeColor`: raw GTFS hex without `#` (e.g. `"FFFFFF"`). Nil when the feed
+    /// has none.
+    public let routeTextColor: String?
     public let mode: TransitMode?
+    /// The stop this departure leaves from (for a station, the platform) and its platform code (GTFS
+    /// `platform_code`), when the feed has one.
+    public let stopGtfsId: String?
+    public let platformCode: String?
+    /// Whether a wheelchair user can ride this departure's trip. Nil = no information.
+    public let wheelchairAccessible: WheelchairBoarding?
 }
 
 /// One stop on a trip's timetable.
@@ -104,23 +134,39 @@ public struct TripStop: Sendable, Equatable {
     public let realtimeDepartureEpochMs: Int64?
     public let isRealtime: Bool
     public let wheelchairBoarding: WheelchairBoarding?
+    /// The platform (GTFS `platform_code`) and fare zone (GTFS `zone_id`) of the stop, when the feed has them.
+    public let platformCode: String?
+    public let zoneId: String?
 }
 
 /// A single trip's route, stops, and geometry.
 public struct TripDetails: Sendable, Equatable {
     public let gtfsId: String
+    public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
+    /// The route's colour: raw GTFS hex without `#` (e.g. `"FF0000"`), passed through as the feed gives it.
+    /// Nil when the feed has none.
+    public let routeColor: String?
+    /// The colour of text drawn on `routeColor`: raw GTFS hex without `#` (e.g. `"FFFFFF"`). Nil when the feed
+    /// has none.
+    public let routeTextColor: String?
     public let mode: TransitMode?
     public let headsign: String?
     public let directionId: String?
     public let bikesAllowed: BikesAllowed?
+    /// Whether a wheelchair user can ride this trip. Nil = no information.
+    public let wheelchairAccessible: WheelchairBoarding?
+    /// The GTFS service date (`YYYY-MM-DD`) the stop times are for — the value to pass to
+    /// `SpiderRealtime.delays`. Nil when the trip has no stop times on the requested day.
+    public let serviceDate: String?
     public let stops: [TripStop]
     public let geometry: [LatLon]
 }
 
 /// Options for a trip-plan search. `departAt`/`arriveBy` are mutually exclusive (arriveBy wins if both set;
-/// neither = depart now). `allowedTransitModes` empty = all modes. `searchWindowMinutes` defaults to 60.
+/// neither = depart now). `allowedTransitModes` empty = all modes. `searchWindowMinutes` defaults to 60 and may go
+/// up to the environment's search-window limit. `maxTransfers` nil = the environment's limit.
 public struct PlanOptions: Sendable {
     public let origin: Location
     public let destination: Location
@@ -170,11 +216,13 @@ struct PlanRequest: Sendable, Equatable {
     let wheelchairAccessible: Bool
 }
 
-// Public methods inline these as literal default arguments (10 / 360) — public default args cannot
-// reference non-public symbols. Keep the literals below in sync with these names if you change them.
 private let DEFAULT_SEARCH_WINDOW_MINUTES = 60
-private let DEFAULT_TIME_RANGE_SECONDS = 24 * 60 * 60
-private let ROUTING_INT_MAX = 2_147_483_647
+// Fixed platform limits, checked before sending. The environment's own limits (search window, result count,
+// number of via locations) are checked by the server.
+private let MAX_TIME_RANGE_SECONDS = 86_400
+private let MIN_STREAM_WINDOW_MINUTES = 120
+private let MAX_VIA_STOP_IDS = 10
+private let MAX_VIA_WAIT_SECONDS = 86_400
 
 // The transit modes valid in a modes filter — the street/leg modes (WALK/BICYCLE/CAR/TRANSIT) must not reach it.
 private let WIRE_TRANSIT_MODES: Set<String> = [
@@ -196,8 +244,10 @@ public final class SpiderRouting {
         self.transport = transport
     }
 
-    /// Plans a trip. Returns the first window of itineraries.
+    /// Plans a trip. Returns the first window of itineraries. A via location outside its fixed limits (1–10
+    /// stop ids, a `minimumWaitSeconds` from 0 to 24 h) fails as `.badRequest` (field `via`) without a request.
     public func plan(_ options: PlanOptions) async throws -> SpiderResult<Route> {
+        if let error = viaError(options.via) { return .failure(error) }
         let request = makeRequest(options)
         return try await page(request)
     }
@@ -218,40 +268,43 @@ public final class SpiderRouting {
     /// as they finalize instead of one batched page. Cold and cancellable: iterating starts the request,
     /// cancelling the consuming task stops the sweep. Each `.result` carries a batch of itineraries with
     /// realtime delays already applied to their legs; a terminal `.done` then carries the continuation cursors
-    /// (or a terminal `.failure`, which is yielded — never thrown).
+    /// and any routing errors (or a terminal `.failure`, which is yielded — never thrown).
     ///
-    /// `targetResults` is a soft floor the sweep aims to reach; `maxWindowMinutes` caps how far it searches.
+    /// `targetResults` is how many itineraries the sweep aims for, up to the environment's result count;
+    /// `maxWindowMinutes` is how far it may search, from 120 (2 h) up to the environment's search-window limit,
+    /// for departing and arriving alike. A `maxWindowMinutes` under 120 or an invalid via location fails as
+    /// `.badRequest` without a request; a value above an environment limit fails the same way from the server.
     /// To continue, read `done.pageInfo` and call `planStreamNext(..., after: done.pageInfo.endCursor)` (when
     /// `hasNextPage`) or `planStreamPrevious(..., before: done.pageInfo.startCursor)` (when `hasPreviousPage`).
     /// `options.searchWindowMinutes` is ignored — the stream paces itself. For a single batched page, use `plan`.
     public func planStream(
         _ options: PlanOptions,
-        targetResults: Int = 5,
-        maxWindowMinutes: Int = 360
+        targetResults: Int,
+        maxWindowMinutes: Int
     ) -> AsyncStream<PlanStreamEvent> {
         planStreamInternal(options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes, after: nil, before: nil)
     }
 
-    /// Continues a plan stream forward from `after` — the `endCursor` of a prior stream's terminal `.done`
-    /// `RoutePageInfo` (only meaningful when that page's `hasNextPage` is true). Repeats `planStream`'s inputs
+    /// Continues a plan stream forward from `after` — the `pageInfo.endCursor` of a prior stream's terminal
+    /// `.done` (only meaningful when that page's `hasNextPage` is true). Repeats `planStream`'s inputs
     /// so `targetResults` / `maxWindowMinutes` can differ per continuation. Same event contract as `planStream`.
     public func planStreamNext(
         _ options: PlanOptions,
-        targetResults: Int = 5,
-        maxWindowMinutes: Int = 360,
+        targetResults: Int,
+        maxWindowMinutes: Int,
         after: String
     ) -> AsyncStream<PlanStreamEvent> {
         planStreamInternal(options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes, after: after, before: nil)
     }
 
-    /// Continues a plan stream backward from `before` — the `startCursor` of a prior stream's terminal `.done`
-    /// `RoutePageInfo` (only meaningful when that page's `hasPreviousPage` is true). Repeats `planStream`'s
+    /// Continues a plan stream backward from `before` — the `pageInfo.startCursor` of a prior stream's terminal
+    /// `.done` (only meaningful when that page's `hasPreviousPage` is true). Repeats `planStream`'s
     /// inputs so `targetResults` / `maxWindowMinutes` can differ per continuation. Same event contract as
     /// `planStream`.
     public func planStreamPrevious(
         _ options: PlanOptions,
-        targetResults: Int = 5,
-        maxWindowMinutes: Int = 360,
+        targetResults: Int,
+        maxWindowMinutes: Int,
         before: String
     ) -> AsyncStream<PlanStreamEvent> {
         planStreamInternal(options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes, after: nil, before: before)
@@ -276,34 +329,39 @@ public final class SpiderRouting {
         }
     }
 
-    /// Departures from a stop, soonest first. `numberOfDepartures` caps the count; `startTime` defaults to now.
+    /// Departures from a stop, soonest first: at most `numberOfDepartures` (from 1 up to the environment's
+    /// limit), leaving within `timeRangeSeconds` (above 0, up to 24 h) of `startTime` (nil = now). A
+    /// `timeRangeSeconds` outside that range fails as `.badRequest` (field `timeRange`) without a request.
     public func departures(
         _ stopId: String,
         numberOfDepartures: Int = 30,
         startTime: Date? = nil,
-        timeRangeSeconds: Int? = nil
+        timeRangeSeconds: Int = 86_400
     ) async throws -> SpiderResult<[Departure]> {
+        guard (1...MAX_TIME_RANGE_SECONDS).contains(timeRangeSeconds) else { return .failure(outOfRange("timeRange")) }
         do {
             let variables = StopDeparturesVariables(
                 id: stopId,
                 numberOfDepartures: numberOfDepartures,
-                startTime: startTime.map { Int($0.timeIntervalSince1970.rounded(.down)) },
-                timeRange: clampSeconds(timeRangeSeconds ?? DEFAULT_TIME_RANGE_SECONDS)
+                timeRange: timeRangeSeconds,
+                startTime: startTime.map { Int($0.timeIntervalSince1970.rounded(.down)) }
             )
             let data: StopDeparturesData = try await transport.graphql(PersistedQueries.departures, variables)
             guard let stop = data.asStop ?? data.asStation else {
                 throw TransportError(.noData, "routing returned no stop or station for id=\(stopId)")
             }
             return .success(mapDepartures(stop))
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }
     }
 
-    /// A single trip's stops, times, and geometry.
+    /// A single trip's stops, times, and geometry on `serviceDate` (`YYYY-MM-DD`, e.g. a `Departure`'s or
+    /// `Leg`'s `serviceDate`; nil = today). A malformed date fails as `.badRequest` without a request.
     public func trip(_ tripId: String, serviceDate: String? = nil) async throws -> SpiderResult<TripDetails> {
+        if let serviceDate, !isServiceDate(serviceDate) {
+            return .failure(invalid("serviceDate"))
+        }
         do {
             let variables = TripVariables(id: tripId, serviceDate: serviceDate)
             let data: TripData = try await transport.graphql(PersistedQueries.trip, variables)
@@ -311,8 +369,6 @@ public final class SpiderRouting {
                 throw TransportError(.noData, "routing returned no trip for id=\(tripId)")
             }
             return .success(mapTrip(trip))
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }
@@ -339,8 +395,6 @@ public final class SpiderRouting {
     private func page(_ request: PlanRequest, before: String? = nil, after: String? = nil) async throws -> SpiderResult<Route> {
         do {
             return .success(try await fetchPlan(request, before: before, after: after))
-        } catch let error as SpiderContractMismatchError {
-            throw error
         } catch {
             return .failure(toSpiderError(error))
         }
@@ -355,7 +409,7 @@ public final class SpiderRouting {
             dateTime: dateTime,
             origin: locationToInput(request.origin),
             destination: locationToInput(request.destination),
-            searchWindow: "PT\(max(1, request.searchWindowMinutes))M",
+            searchWindow: "PT\(request.searchWindowMinutes)M",
             via: request.via.isEmpty ? nil : request.via.map(viaToInput),
             modes: modesInput(request.allowedTransitModes),
             preferences: preferencesInput(request),
@@ -404,11 +458,11 @@ public final class SpiderRouting {
             dateTime: dateTime,
             origin: locationToInput(request.origin),
             destination: locationToInput(request.destination),
+            targetResults: targetResults,
+            maxWindow: "PT\(maxWindowMinutes)M",
             via: request.via.isEmpty ? nil : request.via.map(viaToInput),
             modes: modesInput(request.allowedTransitModes),
             preferences: preferencesInput(request),
-            targetResults: targetResults,
-            maxWindow: "PT\(max(1, maxWindowMinutes))M",
             before: before,
             after: after
         )
@@ -416,9 +470,9 @@ public final class SpiderRouting {
 
     // Runs the SSE `plan-stream` request and pumps parsed events into the continuation. Uses
     // `URLSession.shared.bytes`, whose connection pool the default HTTP client (`.shared`) shares — so the
-    // stream rides the same pool as the batch calls. No contract-version check here (`/routing/plan-stream`
-    // is a streamed surface); every failure — a non-2xx response, a server `error` event, or a decode slip —
-    // becomes a terminal `.failure` event, never a throw. A cancelled task stops the sweep quietly.
+    // stream rides the same pool as the batch calls. Every failure — an input outside its fixed limits, a
+    // non-2xx response, a JSON body in place of the stream, a server `error` event, or a decode slip — becomes
+    // a terminal `.failure` event, never a throw. A cancelled task stops the sweep quietly.
     private func runPlanStream(
         _ options: PlanOptions,
         targetResults: Int,
@@ -427,6 +481,11 @@ public final class SpiderRouting {
         before: String?,
         into continuation: AsyncStream<PlanStreamEvent>.Continuation
     ) async {
+        let inputError = maxWindowMinutes < MIN_STREAM_WINDOW_MINUTES ? outOfRange("maxWindow") : viaError(options.via)
+        if let inputError {
+            continuation.yield(.failure(inputError))
+            return
+        }
         let variables = streamVariables(
             options, targetResults: targetResults, maxWindowMinutes: maxWindowMinutes, after: after, before: before
         )
@@ -441,11 +500,26 @@ public final class SpiderRouting {
 
         do {
             let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
-            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                continuation.yield(.failure(toSpiderError(
-                    TransportError(.http, "routing plan-stream -> \(http.statusCode)", httpStatus: http.statusCode)
-                )))
-                return
+            if let http = response as? HTTPURLResponse {
+                func readBody() async throws -> String {
+                    var body = Data()
+                    for try await byte in bytes {
+                        body.append(byte)
+                        if body.count >= 4096 { break }
+                    }
+                    return String(data: body, encoding: .utf8) ?? ""
+                }
+                if !(200..<300).contains(http.statusCode) {
+                    let text = try await readBody()
+                    continuation.yield(.failure(toSpiderError(routingHTTPError(PersistedQueries.planstream.path, status: http.statusCode, body: text))))
+                    return
+                }
+                // The gateway answers a missing required variable with a 200 GraphQL error body, before any event.
+                let contentType = http.value(forHTTPHeaderField: "content-type")?.lowercased() ?? ""
+                if !contentType.isEmpty && !contentType.contains("text/event-stream") {
+                    continuation.yield(.failure(streamErrorToSpiderError(try await readBody())))
+                    return
+                }
             }
             var eventName: String?
             var dataLines: [String] = []
@@ -456,10 +530,10 @@ public final class SpiderRouting {
                     continuation.yield(event)
                 }
             }
-            for try await line in bytes.lines {
-                if line.isEmpty { flush(); continue }
-                if line.hasPrefix(":") { continue } // comment / heartbeat
-                guard let colon = line.firstIndex(of: ":") else { continue }
+            func handle(_ line: String) {
+                if line.isEmpty { flush(); return }
+                if line.hasPrefix(":") { return } // comment / heartbeat
+                guard let colon = line.firstIndex(of: ":") else { return }
                 let field = String(line[..<colon])
                 var value = String(line[line.index(after: colon)...])
                 if value.hasPrefix(" ") { value.removeFirst() }
@@ -469,6 +543,15 @@ public final class SpiderRouting {
                 default: break // id / retry ignored
                 }
             }
+            // Split lines by hand: `bytes.lines` drops empty lines, and the empty line is what ends an SSE record.
+            var line: [UInt8] = []
+            for try await byte in bytes {
+                guard byte == UInt8(ascii: "\n") else { line.append(byte); continue }
+                if line.last == UInt8(ascii: "\r") { line.removeLast() }
+                handle(String(decoding: line, as: UTF8.self))
+                line.removeAll(keepingCapacity: true)
+            }
+            if !line.isEmpty { handle(String(decoding: line, as: UTF8.self)) }
             flush() // a trailing record with no terminating blank line
         } catch is CancellationError {
             // Cancelled — stop quietly, matching the batch stream helpers.
@@ -559,8 +642,15 @@ private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
         toName: w.to.name,
         fromGtfsId: w.from.stop?.gtfsId,
         toGtfsId: w.to.stop?.gtfsId,
+        fromPlatformCode: w.from.stop?.platformCode,
+        toPlatformCode: w.to.stop?.platformCode,
+        fromZoneId: w.from.stop?.zoneId,
+        toZoneId: w.to.stop?.zoneId,
+        routeGtfsId: w.route?.gtfsId,
         routeShortName: w.route?.shortName,
         routeLongName: w.route?.longName,
+        routeColor: w.route?.color,
+        routeTextColor: w.route?.textColor,
         headsign: w.headsign,
         distanceMeters: w.distance,
         durationSeconds: w.duration,
@@ -601,12 +691,10 @@ func parseDelaySeconds(_ raw: String?) -> Int? {
     return sign * Int(total.rounded())
 }
 
-private func mapDepartures(_ stop: StopDeparturesStop) -> [Departure] {
-    let stopName = stop.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+private func mapDepartures(_ stop: StopDeparturesStop2) -> [Departure] {
     var out: [Departure] = []
     for st in stop.stoptimesWithoutPatterns ?? [] {
         guard let serviceDay = st.serviceDay, let scheduledOffset = st.scheduledDeparture else { continue }
-        if let headsign = st.headsign, headsign.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == stopName { continue }
         let route = st.trip?.route
         out.append(Departure(
             scheduledTimeEpochMs: Int64(serviceDay + scheduledOffset) * 1000,
@@ -615,9 +703,16 @@ private func mapDepartures(_ stop: StopDeparturesStop) -> [Departure] {
             realtimeState: RealtimeState.fromWire(st.realtimeState?.rawValue),
             headsign: st.headsign,
             tripGtfsId: st.trip?.gtfsId,
+            serviceDate: isoServiceDate(ofServiceDay: serviceDay),
+            routeGtfsId: route?.gtfsId,
             routeShortName: route?.shortName,
             routeLongName: route?.longName,
-            mode: TransitMode.fromWire(route?.mode?.rawValue)
+            routeColor: route?.color,
+            routeTextColor: route?.textColor,
+            mode: TransitMode.fromWire(route?.mode?.rawValue),
+            stopGtfsId: st.stop?.gtfsId,
+            platformCode: st.stop?.platformCode,
+            wheelchairAccessible: WheelchairBoarding.fromWire(st.trip?.wheelchairAccessible?.rawValue)
         ))
     }
     return out
@@ -642,24 +737,40 @@ private func mapTrip(_ w: TripTrip) -> TripDetails {
             realtimeArrivalEpochMs: at(st.realtimeArrival),
             realtimeDepartureEpochMs: at(st.realtimeDeparture),
             isRealtime: st.realtime ?? false,
-            wheelchairBoarding: WheelchairBoarding.fromWire(s.wheelchairBoarding?.rawValue)
+            wheelchairBoarding: WheelchairBoarding.fromWire(s.wheelchairBoarding?.rawValue),
+            platformCode: s.platformCode,
+            zoneId: s.zoneId
         ))
     }
     return TripDetails(
         gtfsId: w.gtfsId,
+        routeGtfsId: w.route.gtfsId,
         routeShortName: w.route.shortName,
         routeLongName: w.route.longName,
+        routeColor: w.route.color,
+        routeTextColor: w.route.textColor,
         mode: TransitMode.fromWire(w.route.mode?.rawValue),
         headsign: w.tripHeadsign,
         directionId: w.directionId,
         bikesAllowed: BikesAllowed.fromWire(w.bikesAllowed?.rawValue),
+        wheelchairAccessible: WheelchairBoarding.fromWire(w.wheelchairAccessible?.rawValue),
+        serviceDate: w.stoptimesForDate?.lazy.compactMap(\.serviceDay).first.map { isoServiceDate(ofServiceDay: $0) },
         stops: stops,
         geometry: w.tripGeometry?.points.map(decodePolyline) ?? []
     )
 }
 
-private func clampSeconds(_ seconds: Int) -> Int {
-    max(0, min(seconds, ROUTING_INT_MAX))
+// The fixed limits on each via location; the number of via locations is the server's to check.
+private func viaError(_ via: [ViaLocation]) -> SpiderError? {
+    for location in via {
+        switch location {
+        case .passThrough(let stopIds):
+            if !(1...MAX_VIA_STOP_IDS).contains(stopIds.count) { return outOfRange("via") }
+        case .visit(_, let minimumWaitSeconds):
+            if !(0...MAX_VIA_WAIT_SECONDS).contains(minimumWaitSeconds) { return outOfRange("via") }
+        }
+    }
+    return nil
 }
 
 // MARK: - SSE plan-stream parsing
@@ -677,26 +788,25 @@ private struct StreamPageInfoData: Decodable {
     let hasNextPage: Bool?
     let hasPreviousPage: Bool?
     let searchWindowUsed: String?
+    let routingErrors: [StreamRoutingError]?
+}
+
+// Shaped like batch `planConnection.routingErrors`.
+private struct StreamRoutingError: Decodable {
+    let code: String?
+    let inputField: String?
+    let description: String?
 }
 
 private struct StreamErrorData: Decodable {
-    let errors: [StreamGraphQLError]?
+    let errors: [GraphQLEnvelopeError]?
     let message: String?
-}
-
-private struct StreamGraphQLError: Decodable {
-    let message: String?
-    let extensions: StreamGraphQLErrorExtensions?
-}
-
-private struct StreamGraphQLErrorExtensions: Decodable {
-    let code: String?
-    let field: String?
 }
 
 // Parses one finished SSE record (event name + accumulated data) into a `PlanStreamEvent`; returns nil for
 // records the SDK doesn't surface (heartbeats, unknown events, blank data, and the server's terminal `done`
-// telemetry frame — the `pageInfo` frame is the terminal event the SDK exposes). A malformed payload becomes a
+// telemetry frame — the `pageInfo` frame, carrying the cursors and routing errors, is the terminal event the
+// SDK exposes). A malformed payload becomes a
 // terminal `.failure` rather than tearing the stream down. `internal` so the wire-contract test drives it.
 func parsePlanStreamRecord(event: String, data: String) -> PlanStreamEvent? {
     guard !data.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
@@ -713,18 +823,26 @@ func parsePlanStreamRecord(event: String, data: String) -> PlanStreamEvent? {
     case "pageInfo":
         do {
             let page = try decoder.decode(StreamPageInfoData.self, from: bytes)
-            return .done(RoutePageInfo(
+            let pageInfo = RoutePageInfo(
                 startCursor: page.startCursor,
                 endCursor: page.endCursor,
                 hasNextPage: page.hasNextPage ?? false,
                 hasPreviousPage: page.hasPreviousPage ?? false,
                 searchWindowUsed: page.searchWindowUsed
-            ))
+            )
+            let routingErrors = (page.routingErrors ?? []).map {
+                RoutingError(
+                    code: RoutingErrorCode.fromWire($0.code),
+                    description: $0.description ?? "",
+                    inputField: InputField.fromWire($0.inputField)
+                )
+            }
+            return .done(PlanStreamEvent.Done(pageInfo: pageInfo, routingErrors: routingErrors))
         } catch {
             return .failure(toSpiderError(SpiderDecodingError(message: "failed to decode plan-stream pageInfo", cause: error)))
         }
     case "done":
-        // Terminal server telemetry — it only marks the sweep's end; `pageInfo` already carried the cursors.
+        // Terminal server telemetry — it only marks the sweep's end; `pageInfo` already carried the outcome.
         return nil
     case "error":
         return .failure(streamErrorToSpiderError(data))
@@ -733,16 +851,13 @@ func parsePlanStreamRecord(event: String, data: String) -> PlanStreamEvent? {
     }
 }
 
-// A stream `error` record is the same GraphQL error envelope the batch path returns, so it maps through the
-// same taxonomy — a top-level BAD_REQUEST becomes a typed `.badRequest` (with its field), anything else server.
+// A stream `error` record, or a JSON body sent in place of the stream (malformed input; routing outcomes arrive
+// on `pageInfo` instead), is the same GraphQL error envelope the batch path returns, so it maps through the same
+// taxonomy — a top-level BAD_REQUEST becomes a typed `.badRequest` (with its field), anything else server.
 private func streamErrorToSpiderError(_ data: String) -> SpiderError {
     if let payload = try? JSONDecoder().decode(StreamErrorData.self, from: Data(data.utf8)) {
         if let errors = payload.errors, !errors.isEmpty {
-            if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
-                return toSpiderError(TransportError(.badRequest, bad.message ?? "", field: bad.extensions?.field))
-            }
-            let joined = errors.compactMap { $0.message }.joined(separator: ", ")
-            return toSpiderError(TransportError(.upstream, "routing plan-stream errors: \(joined)"))
+            return toSpiderError(graphQLErrorsError(errors, path: PersistedQueries.planstream.path))
         }
         if let message = payload.message {
             return toSpiderError(TransportError(.upstream, "plan-stream error: \(message)"))
