@@ -148,6 +148,9 @@ public final class SpiderRealtime {
             let encoded = tripId.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed) ?? tripId
             let path = "/realtime/vehicles/by-trip/\(encoded)"
             let raw = try await transport.getRaw(path)
+            if !raw.ok, let limit = planLimitError(status: raw.status, envelope: parseErrorEnvelope(raw.text)) {
+                throw limit
+            }
             if raw.status == 404 {
                 return .success(LiveVehicleUpdate(vehicle: nil, freshness: EMPTY_FRESHNESS))
             }

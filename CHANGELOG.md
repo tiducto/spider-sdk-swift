@@ -1,5 +1,71 @@
 # Changelog
 
+## 1.0.0 - Unreleased
+
+Targets Spider API contract 1.0. The first stable release: from here on, breaking changes need a new major.
+
+### Changed
+
+- **`planStream` / `planStreamNext` / `planStreamPrevious` require `targetResults:` and `maxWindowMinutes:`.**
+  There is no SDK default; `maxWindowMinutes` must be at least 120.
+- **`PlanStreamEvent.done` carries `PlanStreamEvent.Done`**: `pageInfo` (the continuation cursors) and
+  `routingErrors`, shaped as in `plan` and empty when there are none. A `LOCATION_NOT_FOUND` names `.from`,
+  `.to` or `.via` in `inputField`.
+- **`WheelchairBoarding` and `BikesAllowed` gain `.unknown`**, like the other decoded enums (`TransitMode`,
+  `RealtimeState`, `RoutingErrorCode`, `InputField`, `OccupancyStatus`): a value this SDK version doesn't know
+  decodes to `.unknown` instead of nil. `NO_INFORMATION` / `NO_DATA_AVAILABLE` stay nil. An exhaustive `switch`
+  needs the new cases.
+- **HTTP 400 is `.badRequest`** (it was `.unknown`), with `field` set when the server's message names one.
+- **Invalid input is rejected before any request**, as `.badRequest` naming only the field (e.g.
+  `maxWindow is out of range`): a stream window under 2 h (`maxWindow`), a departures `timeRangeSeconds` outside
+  1–86 400 (`timeRange`), more than 50 realtime trip ids across all service dates (`tripIds`), a
+  `StopFilter.limit` outside 1–50 (`limit`), a via pass-through without 1–10 stop ids or a visit wait outside
+  0–86 400 s (`via`), or a malformed `serviceDate` in `trip` or `delays` (`serviceDate is invalid`). Nothing is
+  clamped.
+- **Defaults are always sent.** `departures` sends 30 departures over 24 h unless told otherwise, and
+  `timeRangeSeconds` is a non-optional `Int` (default 86 400). `StopFilter.limit`, `near(…limit:)` and
+  `within(…limit:)` take a non-optional `Int` (default 20). Drop any explicit `nil`.
+- An unknown persisted-query id (403 `persisted_query_rejected`) stays `.unauthorized` and keeps the gateway's
+  message.
+
+### Added
+
+- **`SpiderErrorCode.queryRetired`** (`query_retired`) for a persisted query the API no longer serves
+  (HTTP 410).
+- **`SpiderErrorCode.planningLimitReached`** (`planning_limit_reached`) when the project has reached the
+  trip-planning limit its plan includes: trip planning (`plan`, `planStream`) is refused, the other calls keep
+  working.
+- **`SpiderErrorCode.agreementInactive`** (`agreement_inactive`) when the project's agreement is not active:
+  every call made with the key is refused.
+  Both come from the response body's code whatever the HTTP status, on every surface (including a plan stream
+  refused before it starts). A `vehicleForTrip` 404 carrying one of them is that error, not "no vehicle". The
+  message is the body's, with `trip planning limit reached` / `agreement is not active` when the body has none,
+  and the error carries `httpStatus` and `serverCode`. A 403 without one of these codes stays `.unauthorized`.
+  An exhaustive `switch` on `SpiderErrorCode` needs the three new cases.
+- **Display fields.** `Leg`: `routeGtfsId`, `routeColor`, `routeTextColor`, `fromPlatformCode`,
+  `toPlatformCode`, `fromZoneId`, `toZoneId`. `Departure`: `routeGtfsId`, `routeColor`, `routeTextColor`,
+  `stopGtfsId`, `platformCode`, `wheelchairAccessible`. `TripDetails`: `routeGtfsId`, `routeColor`,
+  `routeTextColor`, `wheelchairAccessible`. `TripStop`: `platformCode`, `zoneId`. Colours are the feed's GTFS
+  hex without `#`.
+- **`Departure.serviceDate` and `TripDetails.serviceDate`** (ISO `YYYY-MM-DD`): the GTFS service date the trip
+  runs on. A departure after midnight on a night line belongs to the previous day's service; pass this value to
+  `delays`.
+- **Stops:** `Stop.code`, `Stop.locationType`, `Stop.wheelchairBoarding`, `Stop.modes`, and
+  `StopFilter.modes` (stops served by at least one of the modes). Search text also matches a stop's code, town
+  and district.
+
+### Removed
+
+- `SpiderContractMismatchError`: a gateway declaring another contract major is no longer an error.
+- The departures filter that dropped rows whose headsign equals the stop name.
+
+### Fixed
+
+- `planStream` yields every record. `bytes.lines` dropped the blank lines that end each SSE record, so the
+  records merged and the stream yielded nothing.
+- A `planStream` answered with a 200 JSON GraphQL error (a missing required variable) ends with `.badRequest`
+  naming the field, instead of ending without an event.
+
 ## 0.7.1
 
 ### Changed
