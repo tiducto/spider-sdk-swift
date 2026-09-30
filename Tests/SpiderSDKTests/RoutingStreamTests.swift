@@ -255,6 +255,39 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertTrue(error.message.contains("persisted query is retired"))
     }
 
+    // A plan-limit refusal is the gateway's plain JSON 403, sent before the stream opens; the stream ends with the
+    // same failure the batch calls return, carrying the body's message.
+    func testPlanStreamPlanLimitRefusalFailsBeforeTheStream() async throws {
+        let cases: [(body: String, code: SpiderErrorCode, message: String)] = [
+            (#"{"error":"search_limit_reached","message":"search limit reached"}"#, .searchLimitReached, "search limit reached"),
+            (#"{"error":"agreement_inactive","message":"agreement is not active"}"#, .agreementInactive, "agreement is not active"),
+        ]
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
+        for (body, code, message) in cases {
+            StubStreamProtocol.respond(status: 403, contentType: "application/json", body: body)
+            let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
+
+            guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
+            XCTAssertEqual(error.code, code)
+            XCTAssertEqual(error.httpStatus, 403)
+            XCTAssertEqual(error.serverCode, code.rawValue)
+            XCTAssertEqual(error.message, message)
+        }
+    }
+
+    // Without a plan-limit code a pre-stream 403 stays unauthorized.
+    func testPlanStreamPlain403StaysUnauthorized() async throws {
+        StubStreamProtocol.respond(status: 403, contentType: "application/json", body: #"{"error":"forbidden","message":"access denied"}"#)
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
+        let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
+
+        guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
+        XCTAssertEqual(error.code, .unauthorized)
+        XCTAssertEqual(error.httpStatus, 403)
+    }
+
     // The gateway answers a missing required variable with a 200 JSON GraphQL error before any event; it maps
     // like the batch path, to a bad request naming the field.
     func testPlanStreamJSONErrorBodyFailsAsBadRequest() async throws {

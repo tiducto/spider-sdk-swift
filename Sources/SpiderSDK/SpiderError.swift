@@ -11,6 +11,10 @@ public enum SpiderErrorCode: String, Sendable {
     case rateLimited = "rate_limited"
     /// The persisted routing query behind the call is retired: the API no longer serves it (HTTP 410).
     case queryRetired = "query_retired"
+    /// The project has used the searches its plan includes: the API refuses trip planning (plan and plan stream).
+    case searchLimitReached = "search_limit_reached"
+    /// The project's agreement is not active: the API refuses every call made with the key.
+    case agreementInactive = "agreement_inactive"
     case decoding
     case unknown
 }
@@ -96,11 +100,29 @@ func parseErrorEnvelope(_ text: String) -> ErrorEnvelope {
 
 let PERSISTED_QUERY_REJECTED = "persisted_query_rejected"
 let QUERY_RETIRED = "query_retired"
+let SEARCH_LIMIT_REACHED = "search_limit_reached"
+let AGREEMENT_INACTIVE = "agreement_inactive"
 
-// A routing non-2xx as a transport error. The gateway names its own rejections in `error`: `query_retired`
-// (HTTP 410, also the fallback when the body is unreadable) and `persisted_query_rejected` (403, an id it never had).
+// The gateway's plan-limit refusals, keyed by the `error` it names them with, and their message when the body
+// carries none.
+private let PLAN_LIMIT_MESSAGES = [
+    SEARCH_LIMIT_REACHED: "search limit reached",
+    AGREEMENT_INACTIVE: "agreement is not active",
+]
+
+// A plan-limit refusal as a transport error, whatever the HTTP status (a proxy may rewrite it): the body's
+// `error` decides, and the message is the body's own. Nil for any other body, so a plain 403 stays unauthorized.
+func planLimitError(status: Int, envelope env: ErrorEnvelope) -> TransportError? {
+    guard let code = env.error, let fallback = PLAN_LIMIT_MESSAGES[code] else { return nil }
+    return TransportError(.http, env.message ?? fallback, httpStatus: status, serverCode: code)
+}
+
+// A routing non-2xx as a transport error. The gateway names its own rejections in `error`: the plan limits
+// (`search_limit_reached`, `agreement_inactive`), `query_retired` (HTTP 410, also the fallback when the body is
+// unreadable) and `persisted_query_rejected` (403, an id it never had).
 func routingHTTPError(_ path: String, status: Int, body: String) -> TransportError {
     let env = parseErrorEnvelope(body)
+    if let limit = planLimitError(status: status, envelope: env) { return limit }
     if env.error == QUERY_RETIRED || status == 410 {
         return TransportError(.http, "routing \(path) -> \(status): persisted query is retired", httpStatus: status, serverCode: QUERY_RETIRED)
     }
@@ -143,6 +165,8 @@ func toSpiderError(_ error: Error) -> SpiderError {
             let status = te.httpStatus ?? 0
             let code: SpiderErrorCode
             switch status {
+            case _ where te.serverCode == SEARCH_LIMIT_REACHED: code = .searchLimitReached
+            case _ where te.serverCode == AGREEMENT_INACTIVE: code = .agreementInactive
             case _ where te.serverCode == QUERY_RETIRED: code = .queryRetired
             // Realtime and stop search answer an invalid input with a plain 400 naming the field.
             case 400: code = .badRequest

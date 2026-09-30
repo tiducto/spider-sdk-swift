@@ -161,6 +161,7 @@ final class Transport {
         if !(200..<300).contains(response.statusCode) {
             let text = String(data: respData, encoding: .utf8) ?? ""
             let env = parseErrorEnvelope(text)
+            if let limit = planLimitError(status: response.statusCode, envelope: env) { throw limit }
             let message = errorMessage?(text) ?? env.message ?? String(text.prefix(300))
             throw TransportError(.http, "POST \(path) -> \(response.statusCode): \(message)", httpStatus: response.statusCode, serverCode: env.code, field: validationField(message))
         }
@@ -171,6 +172,7 @@ final class Transport {
         let raw = try await getRaw(path, query: query)
         if !raw.ok {
             let env = parseErrorEnvelope(raw.text)
+            if let limit = planLimitError(status: raw.status, envelope: env) { throw limit }
             let detail = env.message ?? String(raw.text.prefix(300))
             throw TransportError(.http, "GET \(path) -> \(raw.status): \(detail)", httpStatus: raw.status, serverCode: env.code, field: validationField(detail))
         }
