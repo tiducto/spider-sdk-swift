@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 - Unreleased
+## 1.0.0
 
 Targets Spider API contract 1.0. The first stable release: from here on, breaking changes need a new major.
 
