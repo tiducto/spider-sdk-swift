@@ -4,6 +4,8 @@ public struct Leg: Codable, Sendable {
     public let from: Place
     public let to: Place
     public let mode: Mode?
+    /// Delay in seconds applied to this leg's arrival at the requested `reliability`; null when omitted or unknown.
+    public let typicalArrivalDelay: Int?
     public let realtimeState: RealtimeState?
     public let realTime: Bool?
     public let serviceDate: String?
@@ -13,6 +15,7 @@ public struct Leg: Codable, Sendable {
     public let duration: Double?
     public let accessibilityScore: Double?
     public let trip: Trip?
+    public let interlineWithPreviousLeg: Bool?
     public let legGeometry: Geometry?
 
     public init(
@@ -21,6 +24,7 @@ public struct Leg: Codable, Sendable {
         from: Place,
         to: Place,
         mode: Mode? = nil,
+        typicalArrivalDelay: Int? = nil,
         realtimeState: RealtimeState? = nil,
         realTime: Bool? = nil,
         serviceDate: String? = nil,
@@ -30,6 +34,7 @@ public struct Leg: Codable, Sendable {
         duration: Double? = nil,
         accessibilityScore: Double? = nil,
         trip: Trip? = nil,
+        interlineWithPreviousLeg: Bool? = nil,
         legGeometry: Geometry? = nil
     ) {
         self.start = start
@@ -37,6 +42,7 @@ public struct Leg: Codable, Sendable {
         self.from = from
         self.to = to
         self.mode = mode
+        self.typicalArrivalDelay = typicalArrivalDelay
         self.realtimeState = realtimeState
         self.realTime = realTime
         self.serviceDate = serviceDate
@@ -46,6 +52,7 @@ public struct Leg: Codable, Sendable {
         self.duration = duration
         self.accessibilityScore = accessibilityScore
         self.trip = trip
+        self.interlineWithPreviousLeg = interlineWithPreviousLeg
         self.legGeometry = legGeometry
     }
 }

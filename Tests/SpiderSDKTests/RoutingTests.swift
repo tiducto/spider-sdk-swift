@@ -13,7 +13,7 @@ final class RoutingTests: XCTestCase {
           "to":{"name":"B","stop":{"gtfsId":"S2","wheelchairBoarding":"NOT_POSSIBLE","platformCode":"B","zoneId":"0"}},
           "mode":"BUS","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","color":"FF0000","textColor":"FFFFFF"},"headsign":"Downtown",
           "distance":1500.0,"duration":900.0,"accessibilityScore":1.0,
-          "trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED"},
+          "trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED"},"typicalArrivalDelay":90,"interlineWithPreviousLeg":true,
           "legGeometry":{"points":"_p~iF~ps|U_ulLnnqC_mqNvxq`@"}
         }]
       }}],
@@ -48,6 +48,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(leg.toPlatformCode, "B")
         XCTAssertEqual(leg.fromZoneId, "P")
         XCTAssertEqual(leg.toZoneId, "0")
+        XCTAssertEqual(leg.typicalArrivalDelaySeconds, 90)
+        XCTAssertTrue(leg.interlineWithPreviousLeg)
         XCTAssertTrue(route.pageInfo.hasNextPage)
 
         // Request: URL, method, headers, persisted-query body.
@@ -55,10 +57,10 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.path, "/routing/plan")
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.0")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.0.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.1")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.1.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
-        XCTAssertEqual(req.bodyJSON["id"] as? String, "679549e87f9653ff7a5a021c0b329a2c9658d4701c836139e63712dd9b77981f")
+        XCTAssertEqual(req.bodyJSON["id"] as? String, "70c90bd46b3c765f176dda39bbb2e714b785865d70e14f6cb6d9d72d7a77c210")
         let vars = req.bodyJSON["variables"] as! [String: Any]
         XCTAssertNil(vars["first"])
         XCTAssertNil(vars["last"])
@@ -78,6 +80,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(vars["modes"])
         XCTAssertNil(vars["preferences"])
         XCTAssertNil(vars["via"])
+        XCTAssertNil(vars["reliability"]) // no reliability = plan on the timetable
         XCTAssertNil(vars["last"])
         XCTAssertNil(vars["after"])
         XCTAssertEqual(vars["searchWindow"] as? String, "PT60M")
@@ -114,6 +117,19 @@ final class RoutingTests: XCTestCase {
         _ = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), searchWindowMinutes: 0))
         let vars = mock.requests[0].bodyJSON["variables"] as! [String: Any]
         XCTAssertEqual(vars["searchWindow"] as? String, "PT0M")
+    }
+
+    // Reliability goes out as its wire name and rides along when paging.
+    func testPlanSendsReliabilityAndKeepsItWhenPaging() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), reliability: .verySafe))
+        guard case .success(let route) = result else { return XCTFail("expected success") }
+        _ = try await client.routing.planNext(route)
+        for request in mock.requests {
+            XCTAssertEqual((request.bodyJSON["variables"] as! [String: Any])["reliability"] as? String, "VERY_SAFE")
+        }
+        XCTAssertEqual(mock.requests.count, 2)
+        XCTAssertEqual(Reliability.allCases.map(\.rawValue), ["STANDARD", "SAFE", "VERY_SAFE"])
     }
 
     // Stop ids per via location (1-10) and a visit's wait (0-24 h) are fixed platform limits, checked before sending.
@@ -173,7 +189,9 @@ final class RoutingTests: XCTestCase {
         let leg = route.edges[0].itinerary.legs[0]
         XCTAssertEqual(leg.mode, .unknown)
         XCTAssertEqual(leg.realtimeState, .unknown)
-        // A leg with no route or stops (a walk) has no display fields.
+        // A leg with no route or stops (a walk) has no display fields, no typical delay and no interline.
+        XCTAssertNil(leg.typicalArrivalDelaySeconds)
+        XCTAssertFalse(leg.interlineWithPreviousLeg)
         XCTAssertNil(leg.routeGtfsId)
         XCTAssertNil(leg.routeColor)
         XCTAssertNil(leg.routeTextColor)
@@ -315,7 +333,7 @@ final class RoutingTests: XCTestCase {
     func testDeparturesMapsEveryRowWithServiceDate() async throws {
         let body = """
         {"data":{"asStop":{"gtfsId":"S","name":"Main Square","wheelchairBoarding":"POSSIBLE","stoptimesWithoutPatterns":[
-          {"serviceDay":1700000000,"scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","headsign":"Airport","stop":{"gtfsId":"S:P2","platformCode":"2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"00A0E0","textColor":"000000"}}},
+          {"serviceDay":1700000000,"scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","typicalDelay":45,"headsign":"Airport","stop":{"gtfsId":"S:P2","platformCode":"2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"00A0E0","textColor":"000000"}}},
           {"serviceDay":1700000000,"scheduledDeparture":36300,"realtime":false,"headsign":"main square","trip":{"gtfsId":"T2","wheelchairAccessible":"NO_INFORMATION","route":{"gtfsId":"1:R5","shortName":"5","mode":"TRAM"}}}
         ]}}}
         """
@@ -330,6 +348,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(d.mode, .bus)
         XCTAssertEqual(d.realtimeState, .updated)
         XCTAssertTrue(d.isRealtime)
+        XCTAssertEqual(d.typicalDelaySeconds, 45)
         XCTAssertEqual(d.routeGtfsId, "1:R12")
         XCTAssertEqual(d.routeColor, "00A0E0")
         XCTAssertEqual(d.routeTextColor, "000000")
@@ -344,6 +363,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(bare.stopGtfsId)
         XCTAssertNil(bare.platformCode)
         XCTAssertNil(bare.wheelchairAccessible)
+        XCTAssertNil(bare.typicalDelaySeconds)
         let vars = mock.requests[0].bodyJSON["variables"] as! [String: Any]
         XCTAssertEqual(vars["numberOfDepartures"] as? Int, 10)
     }
@@ -353,7 +373,7 @@ final class RoutingTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(#"{"data":{"asStop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[]}}}"#) }
         _ = try await client.routing.departures("S")
         let body = mock.requests[0].bodyJSON
-        XCTAssertEqual(body["id"] as? String, "e4ae3f49e06982173b38e945c3c02ef113be05e12564145faeade7758295f536")
+        XCTAssertEqual(body["id"] as? String, "5ca190e60b81d09b60da95ed3b92377ee1a73cdf5236383bb883a1b230cf6811")
         let vars = body["variables"] as! [String: Any]
         XCTAssertEqual(vars["numberOfDepartures"] as? Int, 30)
         XCTAssertEqual(vars["timeRange"] as? Int, 86_400)
@@ -403,14 +423,14 @@ final class RoutingTests: XCTestCase {
     func testTripMapsStopsGeometryAndEnums() async throws {
         let body = """
         {"data":{"trip":{"gtfsId":"T1","directionId":"0","tripHeadsign":"Airport","bikesAllowed":"NOT_ALLOWED","wheelchairAccessible":"NOT_POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"FF0000","textColor":"FFFFFF"},"stoptimesForDate":[
-          {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE","platformCode":"1","zoneId":"P"}},
-          {"serviceDay":1700000000,"scheduledArrival":36600,"stop":{"gtfsId":"S2","name":"B"}}
+          {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"typicalDelay":30,"stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE","platformCode":"1","zoneId":"P"}},
+          {"serviceDay":1700000000,"scheduledArrival":36600,"typicalDelay":null,"stop":{"gtfsId":"S2","name":"B"}}
         ],"tripGeometry":{"points":"_p~iF~ps|U","length":2}}}}
         """
         let (client, mock) = makeClient { _ in json(body) }
         let result = try await client.routing.trip("T1", serviceDate: "2026-08-21")
         guard case .success(let trip) = result else { return XCTFail("expected success") }
-        XCTAssertEqual(mock.requests[0].bodyJSON["id"] as? String, "4a10717f45697a241a0843902808cd696eb8ffd102e93238bf753f865d939a3f")
+        XCTAssertEqual(mock.requests[0].bodyJSON["id"] as? String, "dc29ebef5bfcbe8c921e4381bfe0a4b9d869cd011fdade6c155f1a21bd3e5c33")
         XCTAssertEqual(trip.mode, .bus)
         XCTAssertEqual(trip.bikesAllowed, .notAllowed)
         XCTAssertEqual(trip.serviceDate, "2023-11-15")
@@ -423,6 +443,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(trip.stops[0].wheelchairBoarding, .possible)
         XCTAssertEqual(trip.stops[0].platformCode, "1")
         XCTAssertEqual(trip.stops[0].zoneId, "P")
+        XCTAssertEqual(trip.stops[0].typicalDelaySeconds, 30)
+        XCTAssertNil(trip.stops[1].typicalDelaySeconds)
         XCTAssertNil(trip.stops[1].platformCode)
         XCTAssertNil(trip.stops[1].zoneId)
         XCTAssertNil(trip.stops[1].wheelchairBoarding)
