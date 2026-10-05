@@ -1,8 +1,8 @@
 import Foundation
 
-// The public, consumer-facing enums. They map from the raw wire strings via `fromWire`. An unrecognized wire
-// value maps to `.unknown`, so a producer adding a value never breaks decoding. The wire's "nothing known"
-// values (`NO_INFORMATION`, `NO_DATA_AVAILABLE`) map to nil, like an absent value.
+// The public, consumer-facing enums. The decoded ones map from the raw wire strings via `fromWire`. An
+// unrecognized wire value maps to `.unknown`, so a producer adding a value never breaks decoding. The wire's
+// "nothing known" values (`NO_INFORMATION`, `NO_DATA_AVAILABLE`) map to nil, like an absent value.
 
 /// A transit or street mode. Unrecognized values map to `.unknown`.
 public enum TransitMode: String, Sendable, CaseIterable {
@@ -124,4 +124,12 @@ public enum InputField: String, Sendable, CaseIterable {
         guard let raw else { return nil }
         return InputField(rawValue: raw) ?? .unknown
     }
+}
+
+/// How much delay a trip plan allows for: each leg's arrival is planned with the trip's typical delay at that stop,
+/// the median at `.standard`, the 70th percentile at `.safe`, the 90th at `.verySafe`. Sent, never decoded.
+public enum Reliability: String, Sendable, CaseIterable {
+    case standard = "STANDARD"
+    case safe = "SAFE"
+    case verySafe = "VERY_SAFE"
 }

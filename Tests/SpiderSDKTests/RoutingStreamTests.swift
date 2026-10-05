@@ -26,7 +26,8 @@ final class RoutingStreamTests: XCTestCase {
                   "realtimeState": "UPDATED", "realTime": true, "serviceDate": "2026-07-15",
                   "from": { "name": "Origin", "stop": { "gtfsId": "1:A" } },
                   "to":   { "name": "Dest",   "stop": { "gtfsId": "1:B" } },
-                  "route": { "gtfsId": "1:R12", "shortName": "12" }, "trip": { "gtfsId": "1:T" }
+                  "route": { "gtfsId": "1:R12", "shortName": "12" }, "trip": { "gtfsId": "1:T" },
+                  "typicalArrivalDelay": 150, "interlineWithPreviousLeg": true
                 }
               ]
             }
@@ -51,6 +52,8 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(leg.serviceDate, "2026-07-15")
         XCTAssertEqual(leg.fromGtfsId, "1:A")
         XCTAssertEqual(leg.toGtfsId, "1:B")
+        XCTAssertEqual(leg.typicalArrivalDelaySeconds, 150)
+        XCTAssertTrue(leg.interlineWithPreviousLeg)
     }
 
     // The `pageInfo` frame is the terminal event: it maps to `.done`, carrying the continuation cursors +
@@ -156,6 +159,20 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(stopIds, ["1:V"])
     }
 
+    // Reliability goes out as its wire name; without it the key is absent (see the initial wire shape above).
+    func testPlanStreamSendsReliabilityWhenSet() throws {
+        let (client, _) = makeClient { _ in json("{}") }
+        let variables = client.routing.streamVariables(
+            PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), reliability: .safe),
+            targetResults: 5,
+            maxWindowMinutes: 120,
+            after: nil,
+            before: nil
+        )
+        let actual = try streamVariablesJSON(variables)
+        XCTAssertEqual(actual["reliability"] as? String, "SAFE")
+    }
+
     // planStreamNext routes its raw cursor into `after` (and never `before`): the continuation request carries
     // exactly the forward cursor.
     func testPlanStreamNextSendsAfterCursor() throws {
@@ -229,7 +246,7 @@ final class RoutingStreamTests: XCTestCase {
 
         let sent = try XCTUnwrap(StubStreamProtocol.requestBody)
         let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: sent) as? [String: Any])
-        XCTAssertEqual(body["id"] as? String, "40380fc4cf10397a4c20d039cc9428b73757c7fce0de2072ae1685a43efbfc15")
+        XCTAssertEqual(body["id"] as? String, "1c7886ea99de8b6124b2363d2d935baf2b6c0a8e06144f52c596e43fccec9fb9")
         let variables = try XCTUnwrap(body["variables"] as? [String: Any])
         XCTAssertEqual(variables["maxWindow"] as? String, "PT120M")
         XCTAssertEqual(variables["targetResults"] as? Int, 3)

@@ -324,7 +324,8 @@ func planWithOptions(client: SpiderClient) async throws {
         departAt: Date().addingTimeInterval(30 * 60), // leave in half an hour
         allowedTransitModes: [.tram, .bus, .subway],  // empty (the default) means every mode
         maxTransfers: 1,                               // at most one transfer
-        searchWindowMinutes: 90                        // widen the window from the 60-minute default
+        searchWindowMinutes: 90,                       // widen the window from the 60-minute default
+        reliability: .safe                             // plan arrivals with the 70th-percentile delay
     ))
 
     if case .success(let route) = result {
