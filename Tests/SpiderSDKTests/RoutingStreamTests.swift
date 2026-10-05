@@ -159,18 +159,18 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(stopIds, ["1:V"])
     }
 
-    // Reliability goes out as its wire name; without it the key is absent (see the initial wire shape above).
+    // Reliability goes out as its wire name on the initial request and on both continuations; without it the key
+    // is absent (see the initial wire shape above).
     func testPlanStreamSendsReliabilityWhenSet() throws {
         let (client, _) = makeClient { _ in json("{}") }
-        let variables = client.routing.streamVariables(
-            PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), reliability: .safe),
-            targetResults: 5,
-            maxWindowMinutes: 120,
-            after: nil,
-            before: nil
-        )
-        let actual = try streamVariablesJSON(variables)
-        XCTAssertEqual(actual["reliability"] as? String, "SAFE")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), reliability: .safe)
+        for (after, before) in [(nil, nil), ("c-next", nil), (nil, "c-prev")] as [(String?, String?)] {
+            let variables = client.routing.streamVariables(
+                options, targetResults: 5, maxWindowMinutes: 120, after: after, before: before
+            )
+            let actual = try streamVariablesJSON(variables)
+            XCTAssertEqual(actual["reliability"] as? String, "SAFE")
+        }
     }
 
     // planStreamNext routes its raw cursor into `after` (and never `before`): the continuation request carries
