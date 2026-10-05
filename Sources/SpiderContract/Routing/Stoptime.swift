@@ -6,6 +6,8 @@ public struct Stoptime: Codable, Sendable {
     public let realtimeDeparture: Int?
     public let realtime: Bool?
     public let realtimeState: RealtimeState?
+    /// Typical (p50) delay at this stop in seconds for this trip on the service date's day type; null when unknown.
+    public let typicalDelay: Int?
     public let stop: TripStop?
 
     public init(
@@ -16,6 +18,7 @@ public struct Stoptime: Codable, Sendable {
         realtimeDeparture: Int? = nil,
         realtime: Bool? = nil,
         realtimeState: RealtimeState? = nil,
+        typicalDelay: Int? = nil,
         stop: TripStop? = nil
     ) {
         self.serviceDay = serviceDay
@@ -25,6 +28,7 @@ public struct Stoptime: Codable, Sendable {
         self.realtimeDeparture = realtimeDeparture
         self.realtime = realtime
         self.realtimeState = realtimeState
+        self.typicalDelay = typicalDelay
         self.stop = stop
     }
 }

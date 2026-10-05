@@ -6,6 +6,8 @@ public struct PlanConnectionVariables: Codable, Sendable {
     public let via: [PlanViaLocationInput]?
     public let modes: PlanModesInput?
     public let preferences: PlanPreferencesInput?
+    /// Delay-aware planning level; omitted plans on the timetable.
+    public let reliability: Reliability?
     public let before: String?
     public let after: String?
 
@@ -17,6 +19,7 @@ public struct PlanConnectionVariables: Codable, Sendable {
         via: [PlanViaLocationInput]? = nil,
         modes: PlanModesInput? = nil,
         preferences: PlanPreferencesInput? = nil,
+        reliability: Reliability? = nil,
         before: String? = nil,
         after: String? = nil
     ) {
@@ -27,6 +30,7 @@ public struct PlanConnectionVariables: Codable, Sendable {
         self.via = via
         self.modes = modes
         self.preferences = preferences
+        self.reliability = reliability
         self.before = before
         self.after = after
     }
