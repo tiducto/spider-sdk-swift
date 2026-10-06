@@ -550,10 +550,9 @@ public final class SpiderRouting {
                 line.removeAll(keepingCapacity: true)
                 if failed { return }
             }
-            if !line.isEmpty { handle(String(decoding: line, as: UTF8.self)) }
-            flush() // a trailing record with no terminating blank line
-            if !failed && !sawPageInfo {
-                continuation.yield(.failure(toSpiderError(TransportError(.upstream, "plan-stream ended before pageInfo"))))
+            // A record still open at close is incomplete and discarded (WHATWG SSE).
+            if !sawPageInfo {
+                continuation.yield(.failure(SpiderError(code: .network, message: "plan-stream ended before pageInfo")))
             }
         } catch is CancellationError {
             // Cancelled — stop quietly, matching the batch stream helpers.

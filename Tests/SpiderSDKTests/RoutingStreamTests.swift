@@ -297,28 +297,32 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(done.pageInfo.endCursor, "n")
     }
 
-    // A stream that ends before its `pageInfo` (the connection dropped) is a transport failure, after whatever it
-    // delivered; so is a 2xx answer that is not an event stream.
-    func testPlanStreamCutBeforePageInfoFails() async throws {
+    func testPlanStreamCutBeforePageInfoIsANetworkFailure() async throws {
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
-
-        StubStreamProtocol.respond(status: 200, body: """
-        event: chunk
-        data: {"frontier":1200,"found":1,"finalized":1,"results":[{"numberOfTransfers":0,"legs":[]}]}
-
-        """)
-        let cut = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
-        guard cut.count == 2, case .result = cut[0], case .failure(let error) = cut[1] else {
-            return XCTFail("expected result then failure, got \(cut)")
+        let chunk = "event: chunk\ndata: {\"frontier\":1200,\"found\":1,\"finalized\":1,\"results\":[{\"numberOfTransfers\":0,\"legs\":[]}]}\n\n"
+        let pageInfo = "event: pageInfo\ndata: {\"hasNextPage\":false,\"hasPreviousPage\":false,\"routingErrors\":[]}\n"
+        let cases: [(body: String, results: Int)] = [
+            (chunk, 1),
+            (chunk + "event: chunk\ndata: {\"results\":[", 1),
+            (chunk + "event: pageInfo\ndata: {\"hasNextPage\":fa", 1),
+            (chunk + pageInfo, 1),
+            ("", 0),
+        ]
+        for (body, results) in cases {
+            StubStreamProtocol.respond(status: 200, body: body)
+            let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
+            guard events.count == results + 1, case .failure(let error) = events[results] else {
+                return XCTFail("expected \(results) result(s) then a failure, got \(events)")
+            }
+            XCTAssertEqual(error.code, .network, body)
+            XCTAssertEqual(error.message, "plan-stream ended before pageInfo")
         }
-        XCTAssertEqual(error.code, .server)
-        XCTAssertEqual(error.message, "plan-stream ended before pageInfo")
 
         StubStreamProtocol.respond(status: 200, contentType: "application/json", body: #"{"itineraries":[]}"#)
         let json = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
         guard json.count == 1, case .failure(let jsonError) = json[0] else { return XCTFail("expected one failure, got \(json)") }
-        XCTAssertEqual(jsonError.code, .server)
+        XCTAssertEqual(jsonError.code, .network)
     }
 
     // A malformed known event ends the stream: the failure is the last event, nothing after it is read.
