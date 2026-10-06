@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.0.0
+
+Targets Spider API contract 2.0. Routing moves from persisted GraphQL queries to REST. The calls are made the
+same way as in 1.x; the changes are below.
+
+This is a hard cut. Once the API serves contract 2.0, every routing call from a 1.x SDK fails as `.queryRetired`,
+and this version's routing calls need contract 2.0. Stops and realtime are unaffected.
+
+### Changed
+
+- **Routing is REST.** `plan` / `planNext` / `planPrevious` POST a JSON body to `/routing/plan`, the plan stream to
+  `/routing/plan-stream`, `departures` to `/routing/departures` and `trip` to `/routing/trip`.
+- **`.queryRetired` means the part of the API this SDK version calls is retired** (HTTP 410): upgrade the SDK.
+  Every 410, on any surface, maps to it.
+- **`SpiderError.field` on a `.badRequest`** is the server's `field` when the body has one: a dot path from the
+  request body's root (e.g. `preferences.transit.transfer.maximumTransfers`). Otherwise it is the field a
+  `<field> is required|invalid|out of range|not allowed` message names, dot paths included.
+- **A via visit to a coordinate fails before any request**, as `.badRequest` `via is invalid` (field `via`), the
+  answer the server always gave. Visit a stop: `.visit(.stop(id), minimumWaitSeconds:)`.
+- **A via visit's `minimumWaitSeconds` is 0 to 3 600 (1 h)**; more fails as `.badRequest` `via is out of range`
+  without a request.
+- **Plan streams.** A stream that ends before its `.done` (the connection dropped) ends with a `.failure`
+  (`.server`). Events this SDK doesn't know are skipped, so new events are additive. A malformed event's
+  `.failure` is the last event of its stream.
+- **The plan-limit refusals** (`.planningLimitReached`, `.agreementInactive`) are recognised by the body's `code`
+  as well as its `error`.
+
+### Deprecated
+
+Removal candidates for 3.0:
+
+- `RouteEdge.cursor` is always `"NoCursor"`. Page with `Route.pageInfo` (`planNext` / `planPrevious`).
+- `Itinerary.accessibilityScore` and `Leg.accessibilityScore` are always nil.
+
+### Removed
+
+- The `persisted_query_rejected` server code (HTTP 403): `serverCode` never carries it.
+
 ## 1.1.0
 
 Targets Spider API contract 1.1.

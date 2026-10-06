@@ -62,7 +62,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "2.0")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.1.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/2.0.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
         let body = req.bodyJSON
         XCTAssertNil(body["id"])
