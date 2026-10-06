@@ -18,7 +18,7 @@
     "CHANGELOG.md"
   ],
   "rules": [
-    "Construct one SpiderClient with your environment base URL and API key — SpiderClient(baseURL: \"https://your-env-slug.api.tiducto.eu\", apiKey: \"...\") — then reach a surface via client.routing, client.stops, or client.realtime.",
+    "Construct one SpiderClient with your environment base URL and API key — SpiderClient(baseURL: \"https://your-env-slug.api.tiducto.eu\", apiKey: \"...\") — then reach a surface via client.routing, client.stops, or client.realtime. The SDK calls the /routing/v1, /stops/v1 and /realtime/v1 operations on that host.",
     "Plan a trip with client.routing.plan(PlanOptions(origin:destination:departAt:searchWindowMinutes:)); build locations with .coordinate(lat, lon) or .stop(id) (a via visit takes a stop: .visit(.stop(id), minimumWaitSeconds:)), and page results with client.routing.planNext(page) / planPrevious(page). client.routing.planStream(options, targetResults:, maxWindowMinutes:) requires both counts; maxWindowMinutes is at least 120.",
     "List a stop's upcoming departures with client.routing.departures(stopId, numberOfDepartures:), and fetch a single trip's timetable with client.routing.trip(tripId).",
     "Every call returns a SpiderResult you branch on (.success / .failure) instead of throwing. A .failure with code .badRequest names the rejected input in error.field, as a dot path from the request body; code .queryRetired (HTTP 410) means the part of the API this SDK version calls is retired, so upgrade the SDK; code .planningLimitReached means the project has reached the trip-planning limit its plan includes, so trip planning is refused; code .agreementInactive means the project's agreement is not active, so every call is refused."

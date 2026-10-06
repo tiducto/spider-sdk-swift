@@ -14,7 +14,7 @@ Swift Package Manager. In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tiducto/spider-sdk-swift.git", from: "2.0.0"),
+    .package(url: "https://github.com/tiducto/spider-sdk-swift.git", from: "1.2.0"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: [.product(name: "SpiderSDK", package: "spider-sdk-swift")]),
@@ -62,7 +62,7 @@ Failures are values — every call returns a `SpiderResult<T>` you branch on.
 
 ## Contract & codegen
 
-The routing wire models under `Sources/SpiderContract/` are generated from the published contract by `scripts/generate-contract.sh` (via `tiducto/spider-codegen`) and committed — the package carries the types, not the spec. `client.contractVersion` reports the contract version this SDK speaks. Don't hand-edit generated files; re-run the script.
+The routing wire models under `Sources/SpiderContract/` are generated from the published contract by `scripts/generate-contract.sh` (via `tiducto/spider-codegen`) and committed — the package carries the types, not the spec. Routing, stop and realtime calls go to the contract's `/routing/v1`, `/stops/v1` and `/realtime/v1` operations on your environment's host. `client.contractVersion` reports the contract version this SDK speaks. Don't hand-edit generated files; re-run the script.
 
 ## License
 
