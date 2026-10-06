@@ -41,8 +41,7 @@ struct RawResponse {
     var text: String { String(data: data, encoding: .utf8) ?? "" }
 }
 
-/// Translates SDK calls into HTTP against the gateway: builds identity headers, encodes JSON bodies, and runs
-/// the retry/backoff loop. Internal — consumers reach it only through the surface classes on `SpiderClient`.
+/// SDK calls as HTTP against the gateway: identity headers, JSON bodies and the retry/backoff loop.
 final class Transport {
     private let baseURL: String
     private let apiKey: String
@@ -81,7 +80,7 @@ final class Transport {
 
     // MARK: SSE
 
-    // A batch POST plus `accept: text/event-stream`; streamed through `URLSession.bytes`, so it skips `send`/retry.
+    // Streamed through `URLSession.bytes`, so it skips `send` and its retries.
     func streamingRequest<B: Encodable>(_ path: String, _ body: B) throws -> URLRequest {
         guard let url = URL(string: "\(baseURL)\(path)") else {
             throw TransportError(.upstream, "invalid URL for \(path)")

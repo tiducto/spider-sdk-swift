@@ -9,8 +9,7 @@ public enum SpiderErrorCode: String, Sendable {
     case notFound = "not_found"
     case server
     case rateLimited = "rate_limited"
-    /// The part of the API this SDK version calls is retired: the API no longer serves it (HTTP 410). Upgrade the
-    /// SDK.
+    /// HTTP 410: the API no longer serves the part of it this SDK version calls; upgrade the SDK.
     case queryRetired = "query_retired"
     /// The project has reached the trip-planning limit its plan includes: the API refuses plan and plan stream.
     case planningLimitReached = "planning_limit_reached"
@@ -28,12 +27,9 @@ public struct SpiderError: Error {
     public let message: String
     /// The HTTP status, when the failure came from an HTTP response.
     public let httpStatus: Int?
-    /// The machine-readable `code` from a server JSON error envelope, when present: e.g. `query_retired` on a
-    /// `.queryRetired`, or `bad_request` on a `.badRequest`.
+    /// The `code` of the server's JSON error body, when present (e.g. `bad_request` on a `.badRequest`).
     public let serverCode: String?
-    /// For a `badRequest` (a missing, out-of-range, invalid or unknown value, rejected by the SDK before sending or
-    /// by the server), the offending input's wire name when one is named, as a dot path from the request body's
-    /// root (e.g. `preferences.street.walk.reluctance`). Nil otherwise.
+    /// On a `.badRequest`, the offending input as a dot path from the body root (e.g. `preferences.street.walk.reluctance`).
     public let field: String?
     /// The underlying error, when one caused this failure.
     public let cause: Error?
@@ -66,7 +62,6 @@ struct TransportError: Error {
     let message: String
     let httpStatus: Int?
     let serverCode: String?
-    // The offending input field the server named, if any: the body's `field`, or the one its message names.
     let field: String?
 
     init(_ kind: TransportErrorKind, _ message: String, httpStatus: Int? = nil, serverCode: String? = nil, field: String? = nil) {
@@ -83,8 +78,7 @@ struct SpiderDecodingError: Error {
     let cause: Error
 }
 
-/// A parsed server error envelope: a stable machine `code`, a human `message` and the `field` a 400 names, each
-/// possibly absent. `error` is the gateway's own rejection kind (e.g. `planning_limit_reached`).
+/// A parsed server error body; `error` is the gateway's own rejection kind (e.g. `planning_limit_reached`).
 struct ErrorEnvelope {
     let code: String?
     let message: String?
@@ -109,23 +103,19 @@ let QUERY_RETIRED = "query_retired"
 let PLANNING_LIMIT_REACHED = "planning_limit_reached"
 let AGREEMENT_INACTIVE = "agreement_inactive"
 
-// The gateway's plan-limit refusals, keyed by the code it names them with, and their message when the body
-// carries none.
+// The gateway's plan-limit refusals and the message used when the body carries none.
 private let PLAN_LIMIT_MESSAGES = [
     PLANNING_LIMIT_REACHED: "trip planning limit reached",
     AGREEMENT_INACTIVE: "agreement is not active",
 ]
 
-// A plan-limit refusal as a transport error, whatever the HTTP status (a proxy may rewrite it): the body's
-// `code` (or `error`) decides, and the message is the body's own, trimmed, or the fixed wording when it is
-// missing or blank. Nil for any other body, so a plain 403 stays unauthorized.
+// A plan-limit refusal at any status (a proxy may rewrite it); nil otherwise, so a plain 403 stays unauthorized.
 func planLimitError(status: Int, envelope env: ErrorEnvelope) -> TransportError? {
     guard let code = env.code ?? env.error, let fallback = PLAN_LIMIT_MESSAGES[code] else { return nil }
     let message = env.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     return TransportError(.http, message.isEmpty ? fallback : message, httpStatus: status, serverCode: code)
 }
 
-// A non-2xx answer: a plan-limit refusal whatever the status, else the message with the body's `field` or the one it names.
 func httpFailure(_ call: String, status: Int, body: String, message: String? = nil) -> TransportError {
     let env = parseErrorEnvelope(body)
     if let limit = planLimitError(status: status, envelope: env) { return limit }
@@ -135,7 +125,7 @@ func httpFailure(_ call: String, status: Int, body: String, message: String? = n
 
 private let VALIDATION_PROBLEMS = [" is out of range", " is required", " is invalid", " is not allowed"]
 
-// The field (a dot path) named by a message of the fixed `<field> is out of range|required|invalid|not allowed` shape.
+// The dot-path field a fixed-shape `<field> is …` message names; nil for any other message.
 func validationField(_ message: String) -> String? {
     let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
     for problem in VALIDATION_PROBLEMS where text.hasSuffix(problem) {

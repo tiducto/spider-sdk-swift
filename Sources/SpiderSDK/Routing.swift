@@ -266,9 +266,7 @@ public final class SpiderRouting {
         self.transport = transport
     }
 
-    /// Plans a trip. Returns the first window of itineraries. A via location outside its fixed limits fails as
-    /// `.badRequest` without a request: a pass-through without 1–10 stop ids or a visit to a coordinate on field
-    /// `via`, a `minimumWaitSeconds` outside 0 to 1 h on field `via.visit.minimumWaitTime`.
+    /// Plans a trip. Returns the first window of itineraries; a via outside its fixed limits fails without a request.
     public func plan(_ options: PlanOptions) async throws -> SpiderResult<Route> {
         try await page(makeRequest(options))
     }
@@ -293,7 +291,7 @@ public final class SpiderRouting {
     ///
     /// `targetResults` is how many itineraries the sweep aims for, up to the environment's result count;
     /// `maxWindowMinutes` is how far it may search, from 120 (2 h) up to the environment's search-window limit,
-    /// for departing and arriving alike. A `maxWindowMinutes` under 120 or a via location `plan` rejects fails as
+    /// for departing and arriving alike. A `maxWindowMinutes` under 120 or an invalid via location fails as
     /// `.badRequest` without a request; a value above an environment limit fails the same way from the server.
     /// To continue, read `done.pageInfo` and call `planStreamNext(..., after: done.pageInfo.endCursor)` (when
     /// `hasNextPage`) or `planStreamPrevious(..., before: done.pageInfo.startCursor)` (when `hasPreviousPage`).
@@ -451,7 +449,7 @@ public final class SpiderRouting {
         )
     }
 
-    // The plan-stream body; internal so the wire-contract tests pin it. The stream paces itself, so no `searchWindow`.
+    // Internal so the wire tests pin it; no `searchWindow`, the stream paces itself.
     func streamBody(
         _ options: PlanOptions,
         targetResults: Int,
@@ -475,11 +473,7 @@ public final class SpiderRouting {
         )
     }
 
-    // Runs the SSE `plan-stream` request and pumps parsed events into the continuation. Uses
-    // `URLSession.shared.bytes`, whose connection pool the default HTTP client (`.shared`) shares — so the
-    // stream rides the same pool as the batch calls. Every failure — an input outside its fixed limits, a
-    // non-2xx response, a decode slip, or a stream that ends before `pageInfo` — becomes a terminal `.failure`
-    // event, never a throw. A cancelled task stops the sweep quietly.
+    // Rides `URLSession.shared.bytes`, the batch calls' pool; every failure is a terminal `.failure`, never a throw.
     private func runPlanStream(
         _ options: PlanOptions,
         targetResults: Int,
@@ -579,7 +573,7 @@ private func dateTimeInput(_ request: PlanRequest) -> PlanDateTimeInput {
     return request.timeKind == .departAt ? PlanDateTimeInput(earliestDeparture: iso) : PlanDateTimeInput(latestArrival: iso)
 }
 
-// The via locations on the wire, rejecting any outside the fixed limits; how many there may be is the server's to check.
+// Fixed per-location limits only; the via count is the server's to check.
 private func viaInputs(_ via: [ViaLocation]) throws -> [PlanViaLocationInput]? {
     guard !via.isEmpty else { return nil }
     return try via.map { location in
@@ -635,9 +629,7 @@ private func mapItinerary(_ w: SpiderContract.Itinerary) -> Itinerary {
     )
 }
 
-// Shared wire→domain leg mapping, used by both the batch plan and the SSE stream (a stream chunk's
-// itineraries are the same wire `Itinerary` as the plan's). Realtime delays ride here: each
-// leg's estimated time + delay and its realtime state come straight off the wire node.
+// Shared by the batch plan and the stream chunks; realtime delays come straight off the wire leg.
 private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
     Leg(
         mode: TransitMode.fromWire(w.mode?.rawValue),
@@ -789,8 +781,7 @@ private func mapTrip(_ w: TripTimetable) -> TripDetails {
 // The SSE event name a record defaults to when the server sends only `data:` lines.
 private let SSE_DEFAULT_EVENT = "message"
 
-// Parses one finished SSE record into a `PlanStreamEvent`: `chunk` → `.result`, `pageInfo` → `.done`, a malformed
-// payload → `.failure`. Nil for every other record: `done` only ends the stream, and unknown events are ignored.
+// `chunk` → `.result`, `pageInfo` → `.done`, a malformed payload → `.failure`; nil for every other record.
 func parsePlanStreamRecord(event: String, data: String) -> PlanStreamEvent? {
     guard !data.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
     let bytes = Data(data.utf8)

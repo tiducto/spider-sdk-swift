@@ -30,7 +30,6 @@ final class RoutingTests: XCTestCase {
         ))
         guard case .success(let route) = result else { return XCTFail("expected success") }
 
-        // Mapped route: one edge per itinerary.
         XCTAssertEqual(route.edges.count, 1)
         let itinerary = route.edges[0].itinerary
         XCTAssertEqual(itinerary.durationSeconds, 1800)
@@ -56,7 +55,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(route.pageInfo, RoutePageInfo(startCursor: "c0", endCursor: "c1", hasNextPage: true, hasPreviousPage: true, searchWindowUsed: "PT60M"))
         XCTAssertEqual(route.searchDateTime, "2026-08-21T10:00:00Z")
 
-        // Request: URL, method, headers, and the bare REST body.
         let req = mock.requests[0]
         XCTAssertEqual(req.path, "/routing/v1/plan")
         XCTAssertEqual(req.httpMethod, "POST")
@@ -77,8 +75,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(origin["latitude"] as? Double, 49.19)
     }
 
-    // Pins the whole plan body for a request that sets every option the SDK maps, so a regen can't silently
-    // rename, nest or drop a member.
     func testPlanBodyIsThePinnedRestShape() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         _ = try await client.routing.plan(PlanOptions(
@@ -130,7 +126,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(body["modes"])
         XCTAssertNil(body["preferences"])
         XCTAssertNil(body["via"])
-        XCTAssertNil(body["reliability"]) // no reliability = plan on the timetable
+        XCTAssertNil(body["reliability"])
         XCTAssertNil(body["before"])
         XCTAssertNil(body["after"])
         XCTAssertEqual(body["searchWindow"] as? String, "PT60M")
@@ -182,7 +178,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(Reliability.allCases.map(\.rawValue), ["STANDARD", "SAFE", "VERY_SAFE"])
     }
 
-    // Stop ids per via location (1-10) and a visit's wait (0-1 h) are fixed platform limits, checked before sending.
     func testPlanRejectsViaOutsideFixedLimitsWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let eleven = (1...11).map { "1:V\($0)" }
@@ -204,7 +199,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(mock.requests.isEmpty)
     }
 
-    // A visit to a coordinate has no wire form: it fails as the server's own `via is invalid`, before sending.
     func testPlanRejectsCoordinateVisitWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         for via in [
@@ -273,7 +267,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(leg.toZoneId)
     }
 
-    // A declined plan is a 200 with no itineraries and the reason in `routingErrors`, not a failure.
     func testDeclinedPlanIsASuccessWithRoutingErrors() async throws {
         let body = """
         {"itineraries":[],"pageInfo":{"startCursor":null,"endCursor":null,"hasNextPage":false,"hasPreviousPage":false,"searchWindowUsed":null},
@@ -290,7 +283,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(route.pageInfo.searchWindowUsed)
     }
 
-    // The body is the payload itself: a GraphQL `data` envelope is not the routing response.
     func testPlanResponseHasNoDataEnvelope() async throws {
         let enveloped = #"{"data":{"planConnection":{"edges":[],"pageInfo":{"hasNextPage":false,"hasPreviousPage":false},"routingErrors":[]}}}"#
         let (client, _) = makeClient { _ in json(enveloped) }
@@ -300,7 +292,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(error.code, .decoding)
     }
 
-    // A routing 400 names the field in the body's `field`, a dot path from the body root.
     func testRouting400IsBadRequestWithTheBodyField() async throws {
         let body = #"{"code":"bad_request","message":"preferences.transit.transfer.maximumTransfers is out of range","field":"preferences.transit.transfer.maximumTransfers"}"#
         let (client, _) = makeClient { _ in json(body, status: 400) }
@@ -313,8 +304,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(error.message.contains("preferences.transit.transfer.maximumTransfers is out of range"))
     }
 
-    // The body's `field` wins over the message; without one, a message of the fixed `<field> is …` shape (dot paths
-    // and `not allowed` included) names it; any other message names none.
     func testRouting400FieldFromBodyOrFixedMessageShape() async throws {
         let cases: [(String, String?)] = [
             (#"{"code":"bad_request","message":"after is invalid","field":"after"}"#, "after"),
@@ -336,7 +325,6 @@ final class RoutingTests: XCTestCase {
         }
     }
 
-    // A field is named only on a bad request.
     func testFieldIsNilOutsideBadRequest() async throws {
         let (client, _) = makeClient { _ in json(#"{"code":"boom","message":"via is invalid","field":"via"}"#, status: 500) }
         guard case .failure(let error) = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))) else {
@@ -357,7 +345,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(dateTime["earliestDeparture"])
     }
 
-    // The next page is the same body plus `after`; never `before`, `first` or `last`.
     func testPlanNextPagesForwardWithAfter() async throws {
         let page2 = """
         {"itineraries":[],"pageInfo":{"hasNextPage":false,"hasPreviousPage":true,"startCursor":"c2","endCursor":"c2","searchWindowUsed":"PT60M"},"routingErrors":[],"searchDateTime":null}
@@ -374,13 +361,11 @@ final class RoutingTests: XCTestCase {
         var body = mock.requests[1].bodyJSON
         XCTAssertEqual(body.removeValue(forKey: "after") as? String, "c1")
         XCTAssertEqual(body as NSDictionary, mock.requests[0].bodyJSON as NSDictionary)
-        // The last page has no next.
         let none = try await client.routing.planNext(next)
         XCTAssertNil(none)
         XCTAssertEqual(mock.requests.count, 2)
     }
 
-    // The previous page is the same body plus `before`; never `after`, `first` or `last`.
     func testPlanPreviousPagesBackwardWithBefore() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         guard case .success(let first) = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))) else {
@@ -425,7 +410,6 @@ final class RoutingTests: XCTestCase {
         }
     }
 
-    // A 403 without a plan-limit code (a key not accepted here) stays a key problem.
     func testOtherForbiddenStaysAKeyProblem() async throws {
         let (client, _) = makeClient { _ in json(#"{"error":"Access to this API has been disallowed"}"#, status: 403) }
         let result = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B")))
@@ -489,7 +473,6 @@ final class RoutingTests: XCTestCase {
         )
     }
 
-    // An id that is neither a stop nor a station is a 200 with a null board: not found.
     func testDeparturesUnknownStopIsNotFound() async throws {
         let (client, _) = makeClient { _ in json(#"{"stop":null}"#) }
         let error = try await client.routing.departures("1:NOPE").error
@@ -567,7 +550,6 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(trip.geometry.count, 1)
     }
 
-    // Without a service date the body carries only the id; an unknown trip is a 200 with null: not found.
     func testTripWithoutServiceDateAndUnknownTrip() async throws {
         let (client, mock) = makeClient { _ in json(#"{"trip":null}"#) }
         let error = try await client.routing.trip("1:NOPE").error

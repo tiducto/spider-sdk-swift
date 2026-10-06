@@ -2,10 +2,6 @@ import XCTest
 @testable import SpiderSDK
 import SpiderContract
 
-/// Guards the SSE `plan-stream` handling: the record parser that turns `chunk`/`pageInfo` events into the
-/// `PlanStreamEvent`s (`.result` / `.done` / `.failure`, including realtime-delay mapping onto legs) and ignores
-/// every other event, the stream body's wire shape (initial + `after`/`before` continuation), and the public
-/// `planStream` end to end over a stubbed `URLSession.shared`. Mirrors the Kotlin SDK's RoutingStreamTest.
 final class RoutingStreamTests: XCTestCase {
     // A `chunk` carries itinerary nodes; realtime delays ride on each leg's estimated{time,delay} +
     // realtimeState + realTime and must land on the domain Leg exactly as the batch plan maps them. The
@@ -56,8 +52,6 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertTrue(leg.interlineWithPreviousLeg)
     }
 
-    // The `pageInfo` frame is the terminal event: it maps to `.done`, carrying the continuation cursors +
-    // `hasNextPage`/`hasPreviousPage` the caller reads to drive `planStreamNext`/`planStreamPrevious`.
     func testPageInfoMapsToTerminalDone() {
         let data = """
         { "startCursor": "c-prev", "endCursor": "c-next", "hasNextPage": true, "hasPreviousPage": false, "searchWindowUsed": "PT1H", "routingErrors": [] }
@@ -90,8 +84,6 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(done.routingErrors[0].description, "Origin stop not found")
     }
 
-    // The server's terminal `done` frame is not surfaced — `pageInfo` already carried the cursors, so `done` only
-    // marks the sweep's end and parses to nil.
     func testDoneFrameIsIgnored() {
         let data = """
         { "iterations": 3, "windowSeconds": 3600, "resultCount": 5, "stoppedBy": "targetResults" }
@@ -99,8 +91,6 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertNil(parsePlanStreamRecord(event: "done", data: data))
     }
 
-    // An event this SDK doesn't know is ignored, so a new event is additive. `error` is not part of the stream: it
-    // parses to nil like any other unknown event.
     func testHeartbeatsAndUnknownEventsAreIgnored() {
         XCTAssertNil(parsePlanStreamRecord(event: "message", data: ""))
         XCTAssertNil(parsePlanStreamRecord(event: "weird", data: #"{ "x": 1 }"#))
@@ -108,7 +98,6 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertNil(parsePlanStreamRecord(event: "error", data: #"{"data":null,"errors":[{"message":"searchWindow is invalid","extensions":{"code":"BAD_REQUEST"}}]}"#))
     }
 
-    // A known event whose payload breaks its schema is a decoding failure.
     func testMalformedKnownEventIsADecodingFailure() {
         let cases = [
             ("chunk", #"{"results":"nope"}"#),
@@ -130,9 +119,6 @@ final class RoutingStreamTests: XCTestCase {
         try JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as! [String: Any]
     }
 
-    // Pins the initial stream request wire shape (targetResults/maxWindow + via, no cursors) so a contract
-    // regen can't silently rename or reorder the fields the SDK sends to /routing/plan-stream. `searchWindow`,
-    // `first` and `last` are never sent — the stream paces itself.
     func testPlanStreamSendsInitialWireShapeWithoutCursors() throws {
         let (client, _) = makeClient { _ in json("{}") }
         let body = try client.routing.streamBody(
@@ -236,9 +222,6 @@ final class RoutingStreamTests: XCTestCase {
 
     """
 
-    // `planStream` POSTs the bare body to /routing/plan-stream asking for an event stream, with the caller's
-    // `targetResults` and `maxWindow` (both required, no SDK default), and its terminal `.done` carries the routing
-    // errors.
     func testPlanStreamPostsRestBodyAndEndsWithRoutingErrors() async throws {
         StubStreamProtocol.respond(status: 200, body: declinedStream)
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
@@ -265,7 +248,6 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertFalse(done.pageInfo.hasNextPage)
     }
 
-    // Events this SDK doesn't know, wherever they fall, are skipped; the stream still ends with its outcome.
     func testPlanStreamIgnoresUnknownEvents() async throws {
         StubStreamProtocol.respond(status: 200, body: """
         : keep-alive
@@ -325,7 +307,6 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(jsonError.code, .network)
     }
 
-    // A malformed known event ends the stream: the failure is the last event, nothing after it is read.
     func testPlanStreamDecodingFailureIsTerminal() async throws {
         StubStreamProtocol.respond(status: 200, body: """
         event: chunk
@@ -384,7 +365,6 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(error.httpStatus, 403)
     }
 
-    // Validation answers before the stream opens, as a JSON 400 naming the field.
     func testPlanStream400FailsAsBadRequestWithField() async throws {
         StubStreamProtocol.respond(status: 400, contentType: "application/json", body: """
         {"code":"bad_request","message":"targetResults is out of range","field":"targetResults"}
@@ -400,8 +380,6 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertTrue(error.message.contains("targetResults is out of range"))
     }
 
-    // A window under the 2 h platform minimum, a via location outside its fixed limits, or a visit to a coordinate
-    // fails before any request.
     func testPlanStreamRejectsInputsOutsideFixedLimitsWithoutRequest() async throws {
         StubStreamProtocol.respond(status: 200, body: "")
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
@@ -429,8 +407,6 @@ final class RoutingStreamTests: XCTestCase {
     }
 }
 
-// Serves one canned response to `URLSession.shared` (which `planStream` streams through) for requests to `host`,
-// recording the request and its body, so the public stream entry points can be driven end to end.
 final class StubStreamProtocol: URLProtocol {
     static let host = "stream.test"
     private static let lock = NSLock()

@@ -61,7 +61,6 @@ final class PlanLimitTests: XCTestCase {
         }
     }
 
-    // The refusal may name itself in `code` (alongside or instead of `error`); `code` decides.
     func testPlanLimitCodeIsReadFromCodeOrError() async throws {
         let bodies: [(body: String, code: SpiderErrorCode)] = [
             (#"{"code":"planning_limit_reached","message":"trip planning limit reached"}"#, .planningLimitReached),
