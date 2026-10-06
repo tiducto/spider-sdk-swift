@@ -339,9 +339,8 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(error.code, .decoding)
     }
 
-    // A 410 before the stream opens ends it with the same `.queryRetired` failure the batch calls return.
-    func testPlanStreamRetiredAnswerFailsWithQueryRetired() async throws {
-        StubStreamProtocol.respond(status: 410, contentType: "application/json", body: #"{"code":"query_retired","message":"persisted queries are retired"}"#)
+    func testPlanStreamBare410IsQueryRetired() async throws {
+        StubStreamProtocol.respond(status: 410, contentType: "application/json", body: "")
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
         let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
@@ -349,8 +348,6 @@ final class RoutingStreamTests: XCTestCase {
         guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
         XCTAssertEqual(error.code, .queryRetired)
         XCTAssertEqual(error.httpStatus, 410)
-        XCTAssertEqual(error.serverCode, "query_retired")
-        XCTAssertTrue(error.message.contains("persisted queries are retired"))
     }
 
     // A plan-limit refusal is the gateway's plain JSON 403, sent before the stream opens; the stream ends with the

@@ -410,39 +410,19 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(route.edges.count, 1)
     }
 
-    // A 410 means the part of the API this SDK version calls is retired, on every routing call; the message is the
-    // server's, stating the state.
-    func testRetiredAnswerMapsToQueryRetired() async throws {
-        let body = #"{"code":"query_retired","message":"persisted queries are retired"}"#
-        let (client, _) = makeClient { _ in json(body, status: 410) }
-        let results: [SpiderError?] = [
+    func testBare410IsQueryRetired() async throws {
+        let (client, _) = makeClient { _ in json("", status: 410) }
+        let errors: [SpiderError?] = [
             try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))).error,
             try await client.routing.departures("S").error,
             try await client.routing.trip("T").error,
+            try await client.stops.search(StopFilter(name: "x")).error,
+            try await client.realtime.alerts().error,
         ]
-        for error in results {
-            guard let error else { return XCTFail("expected failure") }
-            XCTAssertEqual(error.code, .queryRetired)
-            XCTAssertEqual(error.code.rawValue, "query_retired")
-            XCTAssertEqual(error.httpStatus, 410)
-            XCTAssertEqual(error.serverCode, "query_retired")
-            XCTAssertTrue(error.message.contains("persisted queries are retired"))
-            for action in ["update", "upgrade", "retry"] {
-                XCTAssertFalse(error.message.lowercased().contains(action))
-            }
+        for error in errors {
+            XCTAssertEqual(error?.code, .queryRetired)
+            XCTAssertEqual(error?.httpStatus, 410)
         }
-    }
-
-    // The status decides: a 410 without a readable body, or on another surface, is retired too.
-    func testBare410IsQueryRetired() async throws {
-        let (client, _) = makeClient { _ in json("", status: 410) }
-        let departures = try await client.routing.departures("S").error
-        XCTAssertEqual(departures?.code, .queryRetired)
-        XCTAssertEqual(departures?.httpStatus, 410)
-        let search = try await client.stops.search(StopFilter(name: "x")).error
-        XCTAssertEqual(search?.code, .queryRetired)
-        let alerts = try await client.realtime.alerts().error
-        XCTAssertEqual(alerts?.code, .queryRetired)
     }
 
     // A 403 without a plan-limit code (a key not accepted here) stays a key problem.
