@@ -1,12 +1,10 @@
+/// An origin or destination.
 public struct PlanLabeledLocationInput: Codable, Sendable {
     public let location: PlanLocationInput
-    public let label: String?
 
     public init(
-        location: PlanLocationInput,
-        label: String? = nil
+        location: PlanLocationInput
     ) {
         self.location = location
-        self.label = label
     }
 }

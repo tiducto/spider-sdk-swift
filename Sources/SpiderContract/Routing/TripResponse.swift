@@ -1,12 +1,10 @@
+/// `trip` is null for an unknown id.
 public struct TripResponse: Codable, Sendable {
-    public let data: TripData?
-    public let errors: [GraphQLError]?
+    public let trip: TripTimetable?
 
     public init(
-        data: TripData? = nil,
-        errors: [GraphQLError]? = nil
+        trip: TripTimetable? = nil
     ) {
-        self.data = data
-        self.errors = errors
+        self.trip = trip
     }
 }

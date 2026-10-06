@@ -1,18 +1,19 @@
+/// Walking preferences.
 public struct WalkPreferencesInput: Codable, Sendable {
-    public let boardCost: Int?
-    public let reluctance: Double?
-    public let safetyFactor: Double?
+    /// Walking speed on flat ground in metres per second, at least 0.1; rejected, never clamped.
     public let speed: Double?
+    /// How much worse walking is than riding for the same time, a multiplier from 0.1 to 100000; rejected, never clamped.
+    public let reluctance: Double?
+    /// Generalized cost added for each boarding, an integer from 0 to 1000000; rejected, never clamped.
+    public let boardCost: Int?
 
     public init(
-        boardCost: Int? = nil,
+        speed: Double? = nil,
         reluctance: Double? = nil,
-        safetyFactor: Double? = nil,
-        speed: Double? = nil
+        boardCost: Int? = nil
     ) {
-        self.boardCost = boardCost
-        self.reluctance = reluctance
-        self.safetyFactor = safetyFactor
         self.speed = speed
+        self.reluctance = reluctance
+        self.boardCost = boardCost
     }
 }

@@ -1,18 +1,15 @@
+/// A location the journey stops at.
 public struct PlanVisitViaLocationInput: Codable, Sendable {
-    public let coordinate: PlanCoordinateInput?
-    public let label: String?
-    public let minimumWaitTime: String?
+    /// 1 to 10 feed-prefixed stop or station ids; visiting any one of them is enough. Absent, empty, or more than 10 is a 400 naming `via`.
     public let stopLocationIds: [String]?
+    /// Least time to stay at the location, as an ISO-8601 duration: `PT0S` to `PT1H`; rejected, never clamped. Absent means `PT0S`.
+    public let minimumWaitTime: String?
 
     public init(
-        coordinate: PlanCoordinateInput? = nil,
-        label: String? = nil,
-        minimumWaitTime: String? = nil,
-        stopLocationIds: [String]? = nil
+        stopLocationIds: [String]? = nil,
+        minimumWaitTime: String? = nil
     ) {
-        self.coordinate = coordinate
-        self.label = label
-        self.minimumWaitTime = minimumWaitTime
         self.stopLocationIds = stopLocationIds
+        self.minimumWaitTime = minimumWaitTime
     }
 }

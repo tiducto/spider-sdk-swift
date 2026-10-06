@@ -1,3 +1,4 @@
+/// Accessibility preferences.
 public struct AccessibilityPreferencesInput: Codable, Sendable {
     public let wheelchair: WheelchairPreferencesInput?
 

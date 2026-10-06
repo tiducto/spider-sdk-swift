@@ -3,7 +3,9 @@ public struct StopDeparturesRoute: Codable, Sendable {
     public let shortName: String?
     public let longName: String?
     public let mode: TransitMode?
+    /// Hex without `#`; null when the feed has none.
     public let color: String?
+    /// Hex without `#`; null when the feed has none.
     public let textColor: String?
 
     public init(

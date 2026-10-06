@@ -1,12 +1,15 @@
+/// Exactly one of `routes`, `agencies`.
 public struct TransitFilterSelectInput: Codable, Sendable {
-    public let agencies: [String]?
+    /// Feed-prefixed route ids (`<feedId>:<routeId>`).
     public let routes: [String]?
+    /// Feed-prefixed agency ids (`<feedId>:<agencyId>`).
+    public let agencies: [String]?
 
     public init(
-        agencies: [String]? = nil,
-        routes: [String]? = nil
+        routes: [String]? = nil,
+        agencies: [String]? = nil
     ) {
-        self.agencies = agencies
         self.routes = routes
+        self.agencies = agencies
     }
 }
