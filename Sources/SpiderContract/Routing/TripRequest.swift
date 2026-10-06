@@ -1,4 +1,4 @@
-/// POST body for `/routing/trip`. A key not listed here is a 400 `<key> is not allowed`.
+/// POST body for `/routing/v1/trip`. A key not listed here is a 400 `<key> is not allowed`.
 public struct TripRequest: Codable, Sendable {
     /// Feed-prefixed trip id (`<feedId>:<id>`).
     public let id: String
