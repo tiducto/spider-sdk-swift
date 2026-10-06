@@ -1,21 +1,20 @@
+/// Transit preferences.
 public struct TransitPreferencesInput: Codable, Sendable {
-    public let alight: AlightPreferencesInput?
-    public let board: BoardPreferencesInput?
-    public let filters: [TransitFilterInput]?
-    public let timetable: TimetablePreferencesInput?
     public let transfer: TransferPreferencesInput?
+    public let board: BoardPreferencesInput?
+    public let alight: AlightPreferencesInput?
+    /// Routes or agencies to leave out of the search.
+    public let filters: [TransitFilterInput]?
 
     public init(
-        alight: AlightPreferencesInput? = nil,
+        transfer: TransferPreferencesInput? = nil,
         board: BoardPreferencesInput? = nil,
-        filters: [TransitFilterInput]? = nil,
-        timetable: TimetablePreferencesInput? = nil,
-        transfer: TransferPreferencesInput? = nil
+        alight: AlightPreferencesInput? = nil,
+        filters: [TransitFilterInput]? = nil
     ) {
-        self.alight = alight
-        self.board = board
-        self.filters = filters
-        self.timetable = timetable
         self.transfer = transfer
+        self.board = board
+        self.alight = alight
+        self.filters = filters
     }
 }

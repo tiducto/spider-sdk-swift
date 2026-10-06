@@ -1,5 +1,6 @@
 public struct LegTime: Codable, Sendable {
     public let scheduledTime: String
+    /// Null without realtime.
     public let estimated: RealTimeEstimate?
 
     public init(

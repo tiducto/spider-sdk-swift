@@ -1,5 +1,7 @@
 public struct TripGeometry: Codable, Sendable {
+    /// Encoded polyline (precision 1e5).
     public let points: String?
+    /// Number of points.
     public let length: Int?
 
     public init(

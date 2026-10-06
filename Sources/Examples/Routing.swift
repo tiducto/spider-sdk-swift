@@ -275,18 +275,18 @@ func earlierItineraries(client: SpiderClient) async throws {
     // [END earlierItineraries]
 }
 
-/// Require the trip to pass through a via point, dwelling at least five minutes there.
+/// Require the trip to stop at a via stop, dwelling at least five minutes there.
 func planVia(client: SpiderClient) async throws {
     // [START planVia]
     let result = try await client.routing.plan(PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        via: [.visit(.coordinate(49.2002, 16.6110), minimumWaitSeconds: 300)]
+        via: [.visit(.stop("1:U1234"), minimumWaitSeconds: 300)]
     ))
 
     if case .success(let route) = result {
         for edge in route.edges {
-            print("\(edge.itinerary.numberOfTransfers) transfers, \(edge.itinerary.durationSeconds / 60) min via the waypoint")
+            print("\(edge.itinerary.numberOfTransfers) transfers, \(edge.itinerary.durationSeconds / 60) min via the stop")
         }
     }
     // [END planVia]
@@ -304,8 +304,7 @@ func wheelchairPlan(client: SpiderClient) async throws {
     if case .success(let route) = result {
         for edge in route.edges {
             let itinerary = edge.itinerary
-            let score = itinerary.accessibilityScore.map { String(format: "%.2f", $0) } ?? "n/a"
-            print("accessibility score \(score):")
+            print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?"):")
             for leg in itinerary.legs {
                 let boarding = leg.fromWheelchair == .possible ? "accessible" : "check locally"
                 print("  \(leg.mode?.rawValue ?? "WALK") from \(leg.fromName ?? "?") (\(boarding))")
@@ -410,13 +409,13 @@ func streamWithModes(client: SpiderClient) async throws {
     // [END streamWithModes]
 }
 
-/// Stream a plan that must pass through a via point, dwelling at least five minutes there.
+/// Stream a plan that must stop at a via stop, dwelling at least five minutes there.
 func streamVia(client: SpiderClient) async throws {
     // [START streamVia]
     let options = PlanOptions(
         origin: .coordinate(49.1951, 16.6068),
         destination: .coordinate(49.2246, 16.5747),
-        via: [.visit(.coordinate(49.2002, 16.6110), minimumWaitSeconds: 300)]
+        via: [.visit(.stop("1:U1234"), minimumWaitSeconds: 300)]
     )
 
     for await event in client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120) {
@@ -504,7 +503,7 @@ func handleRoutingErrors(client: SpiderClient) async throws {
             // A missing or out-of-range value, or a malformed via, named by `field`.
             print("invalid request on \(error.field ?? "input"): \(error.message)")
         case .queryRetired:
-            print("the API has retired this query")
+            print("this SDK version calls a retired part of the API")
         case .planningLimitReached:
             print("the project has reached the trip-planning limit its plan includes")
         case .agreementInactive:

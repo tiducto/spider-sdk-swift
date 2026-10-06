@@ -34,38 +34,6 @@ struct TransportConfig {
     let retry: RetryConfig?
 }
 
-// The persisted-query wire body: { id, variables }. The SDK never sends raw GraphQL.
-private struct PersistedRequest<V: Encodable>: Encodable {
-    let id: String
-    let variables: V
-}
-
-private struct GraphQLEnvelope<D: Decodable>: Decodable {
-    let data: D?
-    let errors: [GraphQLEnvelopeError]?
-}
-
-struct GraphQLEnvelopeError: Decodable {
-    let message: String
-    // Present on validation failures the gateway/router stamp; code == "BAD_REQUEST" + the offending field.
-    let extensions: GraphQLErrorExtensions?
-}
-
-struct GraphQLErrorExtensions: Decodable {
-    let code: String?
-    let field: String?
-}
-
-// Top-level GraphQL errors as a transport error: a BAD_REQUEST extension maps to typed badRequest (with its
-// field); anything else stays a generic upstream. Shared by batch calls and the plan stream.
-func graphQLErrorsError(_ errors: [GraphQLEnvelopeError], path: String) -> TransportError {
-    if let bad = errors.first(where: { $0.extensions?.code == "BAD_REQUEST" }) {
-        return TransportError(.badRequest, bad.message, field: bad.extensions?.field)
-    }
-    let joined = errors.map { $0.message }.joined(separator: ", ")
-    return TransportError(.upstream, "routing \(path) errors: \(joined)")
-}
-
 struct RawResponse {
     let ok: Bool
     let status: Int
@@ -73,9 +41,7 @@ struct RawResponse {
     var text: String { String(data: data, encoding: .utf8) ?? "" }
 }
 
-/// Translates SDK calls into HTTP against the gateway: builds identity headers, applies the persisted-query
-/// body shape, and runs the retry/backoff loop. Internal — consumers reach it only through the surface classes
-/// on `SpiderClient`.
+/// SDK calls as HTTP against the gateway: identity headers, JSON bodies and the retry/backoff loop.
 final class Transport {
     private let baseURL: String
     private let apiKey: String
@@ -112,39 +78,14 @@ final class Transport {
         return req
     }
 
-    // MARK: persisted-query POST
+    // MARK: SSE
 
-    func graphql<V: Encodable, D: Decodable>(_ op: PersistedOp, _ variables: V, as: D.Type = D.self) async throws -> D {
-        guard let url = URL(string: "\(baseURL)/routing/\(op.path)") else {
-            throw TransportError(.upstream, "invalid URL for routing/\(op.path)")
+    // Streamed through `URLSession.bytes`, so it skips `send` and its retries.
+    func streamingRequest<B: Encodable>(_ path: String, _ body: B) throws -> URLRequest {
+        guard let url = URL(string: "\(baseURL)\(path)") else {
+            throw TransportError(.upstream, "invalid URL for \(path)")
         }
-        let body = try JSONEncoder().encode(PersistedRequest(id: op.id, variables: variables))
-        let req = request(url: url, method: "POST", body: body, json: true)
-        let (data, response) = try await send(req)
-        if !(200..<300).contains(response.statusCode) {
-            throw routingHTTPError(op.path, status: response.statusCode, body: String(data: data, encoding: .utf8) ?? "")
-        }
-        let envelope: GraphQLEnvelope<D> = try decode(from: data, where: "routing \(op.path)")
-        if let errors = envelope.errors, !errors.isEmpty {
-            throw graphQLErrorsError(errors, path: op.path)
-        }
-        guard let payload = envelope.data else {
-            throw TransportError(.noData, "routing \(op.path) returned no data")
-        }
-        return payload
-    }
-
-    // MARK: SSE (persisted-query stream)
-
-    // Builds the persisted-query POST request for an SSE stream: the same `{id, variables}` body and identity
-    // headers a batch call carries, plus `accept: text/event-stream`. The caller drives it with
-    // `URLSession.bytes`; the response is streamed, not buffered, so it never runs through `send`/retry.
-    func streamingRequest<V: Encodable>(_ op: PersistedOp, _ variables: V) throws -> URLRequest {
-        guard let url = URL(string: "\(baseURL)/routing/\(op.path)") else {
-            throw TransportError(.upstream, "invalid URL for routing/\(op.path)")
-        }
-        let body = try JSONEncoder().encode(PersistedRequest(id: op.id, variables: variables))
-        var req = request(url: url, method: "POST", body: body, json: true)
+        var req = request(url: url, method: "POST", body: try JSONEncoder().encode(body), json: true)
         req.setValue("text/event-stream", forHTTPHeaderField: "accept")
         return req
     }
@@ -160,10 +101,7 @@ final class Transport {
         let (respData, response) = try await send(req)
         if !(200..<300).contains(response.statusCode) {
             let text = String(data: respData, encoding: .utf8) ?? ""
-            let env = parseErrorEnvelope(text)
-            if let limit = planLimitError(status: response.statusCode, envelope: env) { throw limit }
-            let message = errorMessage?(text) ?? env.message ?? String(text.prefix(300))
-            throw TransportError(.http, "POST \(path) -> \(response.statusCode): \(message)", httpStatus: response.statusCode, serverCode: env.code, field: validationField(message))
+            throw httpFailure("POST \(path)", status: response.statusCode, body: text, message: errorMessage?(text))
         }
         return try decode(from: respData, where: "POST \(path)")
     }
@@ -171,10 +109,7 @@ final class Transport {
     func getJson<D: Decodable>(_ path: String, query: [(String, String)] = [], as: D.Type = D.self) async throws -> D {
         let raw = try await getRaw(path, query: query)
         if !raw.ok {
-            let env = parseErrorEnvelope(raw.text)
-            if let limit = planLimitError(status: raw.status, envelope: env) { throw limit }
-            let detail = env.message ?? String(raw.text.prefix(300))
-            throw TransportError(.http, "GET \(path) -> \(raw.status): \(detail)", httpStatus: raw.status, serverCode: env.code, field: validationField(detail))
+            throw httpFailure("GET \(path)", status: raw.status, body: raw.text)
         }
         return try decode(from: raw.data, where: "GET \(path)")
     }

@@ -1,12 +1,15 @@
+/// Boarding preferences.
 public struct BoardPreferencesInput: Codable, Sendable {
-    public let slack: String?
+    /// How much worse waiting at a stop is than riding for the same time, a multiplier from 0.1 to 100000; rejected, never clamped.
     public let waitReluctance: Double?
+    /// Least time at the stop before boarding, as an ISO-8601 duration: `PT0S` to `PT1H`; rejected, never clamped.
+    public let slack: String?
 
     public init(
-        slack: String? = nil,
-        waitReluctance: Double? = nil
+        waitReluctance: Double? = nil,
+        slack: String? = nil
     ) {
-        self.slack = slack
         self.waitReluctance = waitReluctance
+        self.slack = slack
     }
 }

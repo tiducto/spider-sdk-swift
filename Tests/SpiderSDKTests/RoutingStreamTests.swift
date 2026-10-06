@@ -2,10 +2,6 @@ import XCTest
 @testable import SpiderSDK
 import SpiderContract
 
-/// Guards the SSE `plan-stream` handling: the record parser that turns `chunk`/`pageInfo`/`done`/`error`
-/// events into the three `PlanStreamEvent`s (`.result` / `.done` / `.failure`, including realtime-delay
-/// mapping onto legs), the stream request's wire shape (initial + `after`/`before` continuation), and the
-/// public `planStream` end to end over a stubbed `URLSession.shared`. Mirrors the Kotlin SDK's RoutingStreamTest.
 final class RoutingStreamTests: XCTestCase {
     // A `chunk` carries itinerary nodes; realtime delays ride on each leg's estimated{time,delay} +
     // realtimeState + realTime and must land on the domain Leg exactly as the batch plan maps them. The
@@ -56,12 +52,9 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertTrue(leg.interlineWithPreviousLeg)
     }
 
-    // The `pageInfo` frame is the terminal event: it maps to `.done`, carrying the continuation cursors +
-    // `hasNextPage`/`hasPreviousPage` the caller reads to drive `planStreamNext`/`planStreamPrevious`. A frame
-    // without `routingErrors` means none.
     func testPageInfoMapsToTerminalDone() {
         let data = """
-        { "startCursor": "c-prev", "endCursor": "c-next", "hasNextPage": true, "hasPreviousPage": false, "searchWindowUsed": "PT1H" }
+        { "startCursor": "c-prev", "endCursor": "c-next", "hasNextPage": true, "hasPreviousPage": false, "searchWindowUsed": "PT1H", "routingErrors": [] }
         """
         guard case .done(let done)? = parsePlanStreamRecord(event: "pageInfo", data: data) else {
             return XCTFail("expected done")
@@ -91,47 +84,44 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(done.routingErrors[0].description, "Origin stop not found")
     }
 
-    // The server's terminal `done` telemetry frame is not surfaced — `pageInfo` already carried the cursors, so
-    // `done` only marks the sweep's end and parses to nil.
-    func testDoneTelemetryFrameIsIgnored() {
+    func testDoneFrameIsIgnored() {
         let data = """
         { "iterations": 3, "windowSeconds": 3600, "resultCount": 5, "stoppedBy": "targetResults" }
         """
         XCTAssertNil(parsePlanStreamRecord(event: "done", data: data))
     }
 
-    // A stream `error` record is the GraphQL error envelope; a top-level BAD_REQUEST becomes a typed BadRequest.
-    func testErrorEventMapsToTypedBadRequestFailure() {
-        let data = """
-        { "data": null, "errors": [ { "message": "searchWindow exceeds the cap", "extensions": { "code": "BAD_REQUEST", "field": "searchWindow" } } ] }
-        """
-        guard case .failure(let error)? = parsePlanStreamRecord(event: "error", data: data) else {
-            return XCTFail("expected failure")
-        }
-        XCTAssertEqual(error.code, .badRequest)
-        XCTAssertEqual(error.field, "searchWindow")
-        XCTAssertEqual(error.message, "searchWindow exceeds the cap")
-    }
-
     func testHeartbeatsAndUnknownEventsAreIgnored() {
         XCTAssertNil(parsePlanStreamRecord(event: "message", data: ""))
         XCTAssertNil(parsePlanStreamRecord(event: "weird", data: #"{ "x": 1 }"#))
+        XCTAssertNil(parsePlanStreamRecord(event: "progress", data: "not json"))
+        XCTAssertNil(parsePlanStreamRecord(event: "error", data: #"{"data":null,"errors":[{"message":"searchWindow is invalid","extensions":{"code":"BAD_REQUEST"}}]}"#))
+    }
+
+    func testMalformedKnownEventIsADecodingFailure() {
+        let cases = [
+            ("chunk", #"{"results":"nope"}"#),
+            ("pageInfo", #"{"hasNextPage":true}"#),
+            ("pageInfo", "not json"),
+        ]
+        for (event, data) in cases {
+            guard case .failure(let error)? = parsePlanStreamRecord(event: event, data: data) else {
+                return XCTFail("expected failure for \(event) \(data)")
+            }
+            XCTAssertEqual(error.code, .decoding, "\(event) \(data)")
+            XCTAssertEqual(error.message, "failed to decode plan-stream \(event)")
+        }
     }
 
     // MARK: request wire shape
 
-    private func streamVariablesJSON(_ variables: PlanConnectionStreamVariables) throws -> [String: Any] {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        return try JSONSerialization.jsonObject(with: encoder.encode(variables)) as! [String: Any]
+    private func streamBodyJSON(_ body: PlanStreamRequest) throws -> [String: Any] {
+        try JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as! [String: Any]
     }
 
-    // Pins the initial stream request wire shape (targetResults/maxWindow + via, no cursors) so a contract
-    // regen can't silently rename or reorder the fields the SDK sends to /routing/plan-stream. `searchWindow`
-    // must NOT be sent — the stream paces itself.
     func testPlanStreamSendsInitialWireShapeWithoutCursors() throws {
         let (client, _) = makeClient { _ in json("{}") }
-        let variables = client.routing.streamVariables(
+        let body = try client.routing.streamBody(
             PlanOptions(
                 origin: .stop("1:A"),
                 destination: .coordinate(49.2, 16.6),
@@ -143,20 +133,15 @@ final class RoutingStreamTests: XCTestCase {
             after: nil,
             before: nil
         )
-        let actual = try streamVariablesJSON(variables)
-
-        // Field presence + omission (nil optionals must not appear): the wire body carries exactly these keys.
-        XCTAssertEqual(Set(actual.keys), ["dateTime", "origin", "destination", "via", "targetResults", "maxWindow"])
-        XCTAssertEqual(actual["targetResults"] as? Int, 5)
-        XCTAssertEqual(actual["maxWindow"] as? String, "PT180M")
-        XCTAssertNil(actual["searchWindow"])
-        XCTAssertNil(actual["before"])
-        XCTAssertNil(actual["after"])
-        let origin = ((actual["origin"] as! [String: Any])["location"] as! [String: Any])["stopLocation"] as! [String: Any]
-        XCTAssertEqual(origin["stopLocationId"] as? String, "1:A")
-        let via = actual["via"] as! [[String: Any]]
-        let stopIds = (via[0]["passThrough"] as! [String: Any])["stopLocationIds"] as! [String]
-        XCTAssertEqual(stopIds, ["1:V"])
+        let expected: [String: Any] = [
+            "dateTime": ["earliestDeparture": "2026-07-14T03:33:20Z"],
+            "origin": ["location": ["stopLocation": ["stopLocationId": "1:A"]]],
+            "destination": ["location": ["coordinate": ["latitude": 49.2, "longitude": 16.6]]],
+            "via": [["passThrough": ["stopLocationIds": ["1:V"]]]],
+            "targetResults": 5,
+            "maxWindow": "PT180M",
+        ]
+        XCTAssertEqual(try streamBodyJSON(body) as NSDictionary, expected as NSDictionary)
     }
 
     // Reliability goes out as its wire name on the initial request and on both continuations; without it the key
@@ -165,11 +150,10 @@ final class RoutingStreamTests: XCTestCase {
         let (client, _) = makeClient { _ in json("{}") }
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), reliability: .safe)
         for (after, before) in [(nil, nil), ("c-next", nil), (nil, "c-prev")] as [(String?, String?)] {
-            let variables = client.routing.streamVariables(
+            let body = try client.routing.streamBody(
                 options, targetResults: 5, maxWindowMinutes: 120, after: after, before: before
             )
-            let actual = try streamVariablesJSON(variables)
-            XCTAssertEqual(actual["reliability"] as? String, "SAFE")
+            XCTAssertEqual(try streamBodyJSON(body)["reliability"] as? String, "SAFE")
         }
     }
 
@@ -177,14 +161,14 @@ final class RoutingStreamTests: XCTestCase {
     // exactly the forward cursor.
     func testPlanStreamNextSendsAfterCursor() throws {
         let (client, _) = makeClient { _ in json("{}") }
-        let variables = client.routing.streamVariables(
+        let body = try client.routing.streamBody(
             PlanOptions(origin: .stop("1:A"), destination: .stop("1:B")),
             targetResults: 8,
             maxWindowMinutes: 240,
             after: "c-next",
             before: nil
         )
-        let actual = try streamVariablesJSON(variables)
+        let actual = try streamBodyJSON(body)
         XCTAssertEqual(actual["after"] as? String, "c-next")
         XCTAssertNil(actual["before"])
         XCTAssertEqual(actual["targetResults"] as? Int, 8)
@@ -195,14 +179,14 @@ final class RoutingStreamTests: XCTestCase {
     // carries exactly the backward cursor.
     func testPlanStreamPreviousSendsBeforeCursor() throws {
         let (client, _) = makeClient { _ in json("{}") }
-        let variables = client.routing.streamVariables(
+        let body = try client.routing.streamBody(
             PlanOptions(origin: .stop("1:A"), destination: .stop("1:B")),
             targetResults: 5,
             maxWindowMinutes: 360,
             after: nil,
             before: "c-prev"
         )
-        let actual = try streamVariablesJSON(variables)
+        let actual = try streamBodyJSON(body)
         XCTAssertEqual(actual["before"] as? String, "c-prev")
         XCTAssertNil(actual["after"])
     }
@@ -225,43 +209,119 @@ final class RoutingStreamTests: XCTestCase {
         return events
     }
 
-    // `planStream` sends the caller's `targetResults` and `maxWindow` (both required, no SDK default) under the
-    // plan-stream id, and its terminal `.done` carries the routing errors.
-    func testPlanStreamSendsRequiredInputsAndEndsWithRoutingErrors() async throws {
-        StubStreamProtocol.respond(status: 200, body: """
-        event: chunk
-        data: {"results":[]}
+    private let declinedStream = """
+    event: chunk
+    data: {"frontier":0,"found":0,"finalized":0,"results":[]}
 
-        event: pageInfo
-        data: {"hasNextPage":false,"hasPreviousPage":false,"routingErrors":[{"code":"OUTSIDE_SERVICE_PERIOD","inputField":"DATE_TIME","description":"Outside the feed"}]}
+    event: pageInfo
+    data: {"startCursor":null,"endCursor":null,"hasNextPage":false,"hasPreviousPage":false,"searchWindowUsed":null,"routingErrors":[{"code":"OUTSIDE_SERVICE_PERIOD","inputField":"DATE_TIME","description":"Outside the feed"}]}
 
-        event: done
-        data: {"resultCount":0}
+    event: done
+    data: {"iterations":0,"windowSeconds":0,"resultCount":0,"stoppedBy":"rejected"}
 
 
-        """)
+    """
+
+    func testPlanStreamPostsRestBodyAndEndsWithRoutingErrors() async throws {
+        StubStreamProtocol.respond(status: 200, body: declinedStream)
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
         let events = await collect(client.routing.planStream(options, targetResults: 3, maxWindowMinutes: 120))
 
-        let sent = try XCTUnwrap(StubStreamProtocol.requestBody)
-        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: sent) as? [String: Any])
-        XCTAssertEqual(body["id"] as? String, "1c7886ea99de8b6124b2363d2d935baf2b6c0a8e06144f52c596e43fccec9fb9")
-        let variables = try XCTUnwrap(body["variables"] as? [String: Any])
-        XCTAssertEqual(variables["maxWindow"] as? String, "PT120M")
-        XCTAssertEqual(variables["targetResults"] as? Int, 3)
+        let request = try XCTUnwrap(StubStreamProtocol.recordedRequest)
+        XCTAssertEqual(request.url?.path, "/routing/v1/plan-stream")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "accept"), "text/event-stream")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "content-type"), "application/json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-spider-contract-version"), "1.2")
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(StubStreamProtocol.requestBody)) as? [String: Any])
+        XCTAssertNil(body["id"])
+        XCTAssertNil(body["variables"])
+        XCTAssertEqual(body["maxWindow"] as? String, "PT120M")
+        XCTAssertEqual(body["targetResults"] as? Int, 3)
 
         // One event per SSE record, in order: the blank line between records is what separates them.
         guard events.count == 2, case .result = events[0], case .done(let done) = events[1] else {
             return XCTFail("expected result then done, got \(events)")
         }
         XCTAssertEqual(done.routingErrors.map(\.code), [.outsideServicePeriod])
+        XCTAssertFalse(done.pageInfo.hasNextPage)
     }
 
-    // A retired persisted-query id is refused by the gateway before the stream opens; the stream ends with the
-    // same `.queryRetired` failure the batch calls return.
-    func testPlanStreamRetiredQueryFailsWithQueryRetired() async throws {
-        StubStreamProtocol.respond(status: 410, contentType: "application/json", body: #"{"error":"query_retired","message":"persisted query is retired"}"#)
+    func testPlanStreamIgnoresUnknownEvents() async throws {
+        StubStreamProtocol.respond(status: 200, body: """
+        : keep-alive
+
+        event: progress
+        data: {"frontier":600}
+
+        event: chunk
+        data: {"frontier":1200,"found":1,"finalized":1,"results":[{"numberOfTransfers":0,"legs":[]}]}
+
+        event: error
+        data: {"data":null,"errors":[{"message":"boom"}]}
+
+        event: pageInfo
+        data: {"startCursor":"p","endCursor":"n","hasNextPage":true,"hasPreviousPage":true,"searchWindowUsed":"PT20M","routingErrors":[]}
+
+        event: done
+        data: {"iterations":20,"windowSeconds":1200,"resultCount":1,"stoppedBy":"somethingNew"}
+
+
+        """)
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let events = await collect(client.routing.planStream(PlanOptions(origin: .stop("1:A"), destination: .stop("1:B")), targetResults: 1, maxWindowMinutes: 120))
+
+        guard events.count == 2, case .result(let itineraries) = events[0], case .done(let done) = events[1] else {
+            return XCTFail("expected result then done, got \(events)")
+        }
+        XCTAssertEqual(itineraries.count, 1)
+        XCTAssertEqual(done.pageInfo.endCursor, "n")
+    }
+
+    func testPlanStreamCutBeforePageInfoIsANetworkFailure() async throws {
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
+        let chunk = "event: chunk\ndata: {\"frontier\":1200,\"found\":1,\"finalized\":1,\"results\":[{\"numberOfTransfers\":0,\"legs\":[]}]}\n\n"
+        let pageInfo = "event: pageInfo\ndata: {\"hasNextPage\":false,\"hasPreviousPage\":false,\"routingErrors\":[]}\n"
+        let cases: [(body: String, results: Int)] = [
+            (chunk, 1),
+            (chunk + "event: chunk\ndata: {\"results\":[", 1),
+            (chunk + "event: pageInfo\ndata: {\"hasNextPage\":fa", 1),
+            (chunk + pageInfo, 1),
+            ("", 0),
+        ]
+        for (body, results) in cases {
+            StubStreamProtocol.respond(status: 200, body: body)
+            let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
+            guard events.count == results + 1, case .failure(let error) = events[results] else {
+                return XCTFail("expected \(results) result(s) then a failure, got \(events)")
+            }
+            XCTAssertEqual(error.code, .network, body)
+            XCTAssertEqual(error.message, "plan-stream ended before pageInfo")
+        }
+
+        StubStreamProtocol.respond(status: 200, contentType: "application/json", body: #"{"itineraries":[]}"#)
+        let json = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
+        guard json.count == 1, case .failure(let jsonError) = json[0] else { return XCTFail("expected one failure, got \(json)") }
+        XCTAssertEqual(jsonError.code, .network)
+    }
+
+    func testPlanStreamDecodingFailureIsTerminal() async throws {
+        StubStreamProtocol.respond(status: 200, body: """
+        event: chunk
+        data: {"results":"nope"}
+
+        """ + declinedStream)
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let events = await collect(client.routing.planStream(PlanOptions(origin: .stop("1:A"), destination: .stop("1:B")), targetResults: 5, maxWindowMinutes: 120))
+
+        guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
+        XCTAssertEqual(error.code, .decoding)
+    }
+
+    func testPlanStreamBare410IsQueryRetired() async throws {
+        StubStreamProtocol.respond(status: 410, contentType: "application/json", body: "")
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
         let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
@@ -269,7 +329,6 @@ final class RoutingStreamTests: XCTestCase {
         guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
         XCTAssertEqual(error.code, .queryRetired)
         XCTAssertEqual(error.httpStatus, 410)
-        XCTAssertTrue(error.message.contains("persisted query is retired"))
     }
 
     // A plan-limit refusal is the gateway's plain JSON 403, sent before the stream opens; the stream ends with the
@@ -278,6 +337,7 @@ final class RoutingStreamTests: XCTestCase {
         let cases: [(body: String, code: SpiderErrorCode, message: String)] = [
             (#"{"error":"planning_limit_reached","message":"trip planning limit reached"}"#, .planningLimitReached, "trip planning limit reached"),
             (#"{"error":"agreement_inactive","message":"agreement is not active"}"#, .agreementInactive, "agreement is not active"),
+            (#"{"code":"planning_limit_reached","error":"planning_limit_reached","message":"limit"}"#, .planningLimitReached, "limit"),
         ]
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
@@ -305,53 +365,55 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(error.httpStatus, 403)
     }
 
-    // The gateway answers a missing required variable with a 200 JSON GraphQL error before any event; it maps
-    // like the batch path, to a bad request naming the field.
-    func testPlanStreamJSONErrorBodyFailsAsBadRequest() async throws {
-        StubStreamProtocol.respond(status: 200, contentType: "application/json", body: """
-        {"data":null,"errors":[{"message":"maxWindow is required","extensions":{"code":"BAD_REQUEST","field":"maxWindow"}}]}
+    func testPlanStream400FailsAsBadRequestWithField() async throws {
+        StubStreamProtocol.respond(status: 400, contentType: "application/json", body: """
+        {"code":"bad_request","message":"targetResults is out of range","field":"targetResults"}
         """)
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
-        let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
+        let events = await collect(client.routing.planStream(options, targetResults: 500, maxWindowMinutes: 120))
 
         guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
         XCTAssertEqual(error.code, .badRequest)
-        XCTAssertEqual(error.field, "maxWindow")
-        XCTAssertEqual(error.message, "maxWindow is required")
+        XCTAssertEqual(error.httpStatus, 400)
+        XCTAssertEqual(error.field, "targetResults")
+        XCTAssertTrue(error.message.contains("targetResults is out of range"))
     }
 
-    // A window under the 2 h platform minimum, or a via location outside its fixed limits, fails before any request.
     func testPlanStreamRejectsInputsOutsideFixedLimitsWithoutRequest() async throws {
         StubStreamProtocol.respond(status: 200, body: "")
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
         let viaOptions = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.passThrough(stopIds: [])])
-        let cases: [(AsyncStream<PlanStreamEvent>, String)] = [
-            (client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 119), "maxWindow"),
-            (client.routing.planStreamNext(options, targetResults: 5, maxWindowMinutes: 0, after: "c"), "maxWindow"),
-            (client.routing.planStreamPrevious(options, targetResults: 5, maxWindowMinutes: -120, before: "c"), "maxWindow"),
-            (client.routing.planStream(viaOptions, targetResults: 5, maxWindowMinutes: 120), "via"),
+        let coordinateVisit = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.visit(.coordinate(49.2, 16.6))])
+        let longVisit = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.visit(.stop("1:V"), minimumWaitSeconds: 3_601)])
+        let cases: [(AsyncStream<PlanStreamEvent>, String, String)] = [
+            (client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 119), "maxWindow", "maxWindow is out of range"),
+            (client.routing.planStreamNext(options, targetResults: 5, maxWindowMinutes: 0, after: "c"), "maxWindow", "maxWindow is out of range"),
+            (client.routing.planStreamPrevious(options, targetResults: 5, maxWindowMinutes: -120, before: "c"), "maxWindow", "maxWindow is out of range"),
+            (client.routing.planStream(viaOptions, targetResults: 5, maxWindowMinutes: 120), "via", "via is out of range"),
+            (client.routing.planStream(longVisit, targetResults: 5, maxWindowMinutes: 120), "via.visit.minimumWaitTime", "via.visit.minimumWaitTime is out of range"),
+            (client.routing.planStream(coordinateVisit, targetResults: 5, maxWindowMinutes: 120), "via", "via is invalid"),
+            (client.routing.planStreamNext(coordinateVisit, targetResults: 5, maxWindowMinutes: 120, after: "c"), "via", "via is invalid"),
         ]
-        for (stream, field) in cases {
+        for (stream, field, message) in cases {
             let events = await collect(stream)
             guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
             XCTAssertEqual(error.code, .badRequest)
             XCTAssertEqual(error.field, field)
-            XCTAssertEqual(error.message, "\(field) is out of range")
+            XCTAssertEqual(error.message, message)
         }
-        XCTAssertNil(StubStreamProtocol.requestBody)
+        XCTAssertNil(StubStreamProtocol.recordedRequest)
     }
 }
 
-// Serves one canned response to `URLSession.shared` (which `planStream` streams through) for requests to `host`,
-// recording the request body, so the public stream entry points can be driven end to end.
 final class StubStreamProtocol: URLProtocol {
     static let host = "stream.test"
     private static let lock = NSLock()
     private static var status = 200
     private static var contentType = "text/event-stream"
     private static var body = ""
+    private static var lastRequest: URLRequest?
     private static var recordedBody: Data?
 
     static func respond(status: Int, contentType: String = "text/event-stream", body: String) {
@@ -359,7 +421,13 @@ final class StubStreamProtocol: URLProtocol {
         self.status = status
         self.contentType = contentType
         self.body = body
+        lastRequest = nil
         recordedBody = nil
+    }
+
+    static var recordedRequest: URLRequest? {
+        lock.lock(); defer { lock.unlock() }
+        return lastRequest
     }
 
     static var requestBody: Data? {
@@ -373,6 +441,7 @@ final class StubStreamProtocol: URLProtocol {
     override func startLoading() {
         let sent = request.httpBody ?? request.httpBodyStream.map(Self.readAll)
         Self.lock.lock()
+        Self.lastRequest = request
         Self.recordedBody = sent
         let status = Self.status
         let contentType = Self.contentType

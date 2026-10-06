@@ -1,18 +1,18 @@
+/// Which modes the search may use.
 public struct PlanModesInput: Codable, Sendable {
-    public let direct: [PlanDirectMode]?
+    /// Only a direct walk, without transit.
     public let directOnly: Bool?
-    public let transit: PlanTransitModesInput?
+    /// Never a journey without a transit leg.
     public let transitOnly: Bool?
+    public let transit: PlanTransitModesInput?
 
     public init(
-        direct: [PlanDirectMode]? = nil,
         directOnly: Bool? = nil,
-        transit: PlanTransitModesInput? = nil,
-        transitOnly: Bool? = nil
+        transitOnly: Bool? = nil,
+        transit: PlanTransitModesInput? = nil
     ) {
-        self.direct = direct
         self.directOnly = directOnly
-        self.transit = transit
         self.transitOnly = transitOnly
+        self.transit = transit
     }
 }

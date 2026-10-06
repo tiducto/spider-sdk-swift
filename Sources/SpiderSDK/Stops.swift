@@ -114,7 +114,7 @@ public final class SpiderStops {
     public func search(_ filter: StopFilter) async throws -> SpiderResult<[Stop]> {
         do {
             let body = try buildStopSearchRequest(filter)
-            let response: StopSearchResponse = try await transport.postJson("/stops/search", body, errorMessage: extractStopError)
+            let response: StopSearchResponse = try await transport.postJson("/stops/v1/search", body, errorMessage: extractStopError)
             return .success(response.hits.map(toStop))
         } catch {
             return .failure(toSpiderError(error))
@@ -126,7 +126,7 @@ public final class SpiderStops {
     public func byId(_ gtfsId: String) async throws -> Stop? {
         do {
             let body = StopSearchRequest(q: "", filter: "\"gtfsId\" = \"\(escapeFilter(gtfsId))\"", sort: nil, limit: 1)
-            let response: StopSearchResponse = try await transport.postJson("/stops/search", body, errorMessage: extractStopError)
+            let response: StopSearchResponse = try await transport.postJson("/stops/v1/search", body, errorMessage: extractStopError)
             return response.hits.first.map(toStop)
         } catch {
             throw toSpiderError(error)

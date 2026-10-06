@@ -9,7 +9,7 @@ public enum SpiderErrorCode: String, Sendable {
     case notFound = "not_found"
     case server
     case rateLimited = "rate_limited"
-    /// The persisted routing query behind the call is retired: the API no longer serves it (HTTP 410).
+    /// HTTP 410: the API no longer serves the part of it this SDK version calls; upgrade the SDK.
     case queryRetired = "query_retired"
     /// The project has reached the trip-planning limit its plan includes: the API refuses plan and plan stream.
     case planningLimitReached = "planning_limit_reached"
@@ -27,11 +27,9 @@ public struct SpiderError: Error {
     public let message: String
     /// The HTTP status, when the failure came from an HTTP response.
     public let httpStatus: Int?
-    /// The machine-readable `code` from a server JSON error envelope, when present: e.g. `query_retired` on a
-    /// `.queryRetired`, or `persisted_query_rejected` (HTTP 403) when the gateway doesn't know the query id.
+    /// The `code` of the server's JSON error body, when present (e.g. `bad_request` on a `.badRequest`).
     public let serverCode: String?
-    /// For a `badRequest` (a missing, out-of-range or invalid value, rejected by the SDK before sending or by the
-    /// server), the offending input's wire name when one is named. Nil otherwise.
+    /// On a `.badRequest`, the offending input as a dot path from the body root (e.g. `preferences.street.walk.reluctance`).
     public let field: String?
     /// The underlying error, when one caused this failure.
     public let cause: Error?
@@ -64,8 +62,6 @@ struct TransportError: Error {
     let message: String
     let httpStatus: Int?
     let serverCode: String?
-    // The offending input field the server named, if any: from a BAD_REQUEST extension, or from an HTTP error
-    // message of the fixed `<field> is …` shape.
     let field: String?
 
     init(_ kind: TransportErrorKind, _ message: String, httpStatus: Int? = nil, serverCode: String? = nil, field: String? = nil) {
@@ -82,67 +78,60 @@ struct SpiderDecodingError: Error {
     let cause: Error
 }
 
-/// A parsed server error envelope: a stable machine `code` and a human `message`, either possibly absent.
-/// `error` is the gateway's own rejection kind (e.g. `persisted_query_rejected`), which it sends instead of `code`.
+/// A parsed server error body; `error` is the gateway's own rejection kind (e.g. `planning_limit_reached`).
 struct ErrorEnvelope {
     let code: String?
     let message: String?
     let error: String?
+    let field: String?
 }
 
 func parseErrorEnvelope(_ text: String) -> ErrorEnvelope {
     guard let data = text.data(using: .utf8),
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        return ErrorEnvelope(code: nil, message: nil, error: nil)
+        return ErrorEnvelope(code: nil, message: nil, error: nil, field: nil)
     }
-    return ErrorEnvelope(code: obj["code"] as? String, message: obj["message"] as? String, error: obj["error"] as? String)
+    return ErrorEnvelope(
+        code: obj["code"] as? String,
+        message: obj["message"] as? String,
+        error: obj["error"] as? String,
+        field: obj["field"] as? String
+    )
 }
 
-let PERSISTED_QUERY_REJECTED = "persisted_query_rejected"
 let QUERY_RETIRED = "query_retired"
 let PLANNING_LIMIT_REACHED = "planning_limit_reached"
 let AGREEMENT_INACTIVE = "agreement_inactive"
 
-// The gateway's plan-limit refusals, keyed by the `error` it names them with, and their message when the body
-// carries none.
+// The gateway's plan-limit refusals and the message used when the body carries none.
 private let PLAN_LIMIT_MESSAGES = [
     PLANNING_LIMIT_REACHED: "trip planning limit reached",
     AGREEMENT_INACTIVE: "agreement is not active",
 ]
 
-// A plan-limit refusal as a transport error, whatever the HTTP status (a proxy may rewrite it): the body's
-// `error` decides, and the message is the body's own, trimmed, or the fixed wording when it is missing or blank.
-// Nil for any other body, so a plain 403 stays unauthorized.
+// A plan-limit refusal at any status (a proxy may rewrite it); nil otherwise, so a plain 403 stays unauthorized.
 func planLimitError(status: Int, envelope env: ErrorEnvelope) -> TransportError? {
-    guard let code = env.error, let fallback = PLAN_LIMIT_MESSAGES[code] else { return nil }
+    guard let code = env.code ?? env.error, let fallback = PLAN_LIMIT_MESSAGES[code] else { return nil }
     let message = env.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     return TransportError(.http, message.isEmpty ? fallback : message, httpStatus: status, serverCode: code)
 }
 
-// A routing non-2xx as a transport error. The gateway names its own rejections in `error`: the plan limits
-// (`planning_limit_reached`, `agreement_inactive`), `query_retired` (HTTP 410, also the fallback when the body is
-// unreadable) and `persisted_query_rejected` (403, an id it never had).
-func routingHTTPError(_ path: String, status: Int, body: String) -> TransportError {
+func httpFailure(_ call: String, status: Int, body: String, message: String? = nil) -> TransportError {
     let env = parseErrorEnvelope(body)
     if let limit = planLimitError(status: status, envelope: env) { return limit }
-    if env.error == QUERY_RETIRED || status == 410 {
-        return TransportError(.http, "routing \(path) -> \(status): persisted query is retired", httpStatus: status, serverCode: QUERY_RETIRED)
-    }
-    let detail = env.message ?? String(body.prefix(300))
-    let serverCode = env.error == PERSISTED_QUERY_REJECTED ? PERSISTED_QUERY_REJECTED : env.code
-    return TransportError(.http, "routing \(path) -> \(status): \(detail)", httpStatus: status, serverCode: serverCode, field: validationField(detail))
+    let detail = message ?? env.message ?? String(body.prefix(300))
+    return TransportError(.http, "\(call) -> \(status): \(detail)", httpStatus: status, serverCode: env.code, field: env.field ?? validationField(detail))
 }
 
-private let VALIDATION_PROBLEMS = [" is out of range", " is required", " is invalid"]
+private let VALIDATION_PROBLEMS = [" is out of range", " is required", " is invalid", " is not allowed"]
 
-// The field a server validation message names, when the message has the fixed `<field> is out of range`,
-// `<field> is required` or `<field> is invalid` shape. Nil for any other message.
+// The dot-path field a fixed-shape `<field> is …` message names; nil for any other message.
 func validationField(_ message: String) -> String? {
     let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
     for problem in VALIDATION_PROBLEMS where text.hasSuffix(problem) {
         let field = text.dropLast(problem.count)
         guard let first = field.first, first.isASCII, first.isLetter || first == "_",
-              field.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }) else { return nil }
+              field.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == ".") }) else { return nil }
         return String(field)
     }
     return nil
@@ -170,10 +159,10 @@ func toSpiderError(_ error: Error) -> SpiderError {
             case _ where te.serverCode == PLANNING_LIMIT_REACHED: code = .planningLimitReached
             case _ where te.serverCode == AGREEMENT_INACTIVE: code = .agreementInactive
             case _ where te.serverCode == QUERY_RETIRED: code = .queryRetired
-            // Realtime and stop search answer an invalid input with a plain 400 naming the field.
             case 400: code = .badRequest
             case 401, 403: code = .unauthorized
             case 404: code = .notFound
+            case 410: code = .queryRetired
             case 408, 504: code = .timeout
             case 429: code = .rateLimited
             case 500...599: code = .server

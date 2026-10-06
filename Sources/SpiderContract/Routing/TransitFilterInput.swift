@@ -1,12 +1,11 @@
+/// A filter on the trips the search may ride.
 public struct TransitFilterInput: Codable, Sendable {
+    /// Leave out every trip of a route or agency that any of these selectors names.
     public let exclude: [TransitFilterSelectInput]?
-    public let include: [TransitFilterSelectInput]?
 
     public init(
-        exclude: [TransitFilterSelectInput]? = nil,
-        include: [TransitFilterSelectInput]? = nil
+        exclude: [TransitFilterSelectInput]? = nil
     ) {
         self.exclude = exclude
-        self.include = include
     }
 }
