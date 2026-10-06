@@ -246,7 +246,7 @@ final class RoutingStreamTests: XCTestCase {
         let events = await collect(client.routing.planStream(options, targetResults: 3, maxWindowMinutes: 120))
 
         let request = try XCTUnwrap(StubStreamProtocol.recordedRequest)
-        XCTAssertEqual(request.url?.path, "/routing/plan-stream")
+        XCTAssertEqual(request.url?.path, "/routing/v1/plan-stream")
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "accept"), "text/event-stream")
         XCTAssertEqual(request.value(forHTTPHeaderField: "content-type"), "application/json")

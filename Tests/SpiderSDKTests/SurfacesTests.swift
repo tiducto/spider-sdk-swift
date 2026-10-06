@@ -26,7 +26,7 @@ final class StopsTests: XCTestCase {
         XCTAssertEqual(stops[2].wheelchairBoarding, .unknown) // a code GTFS doesn't define
 
         let req = mock.requests[0]
-        XCTAssertEqual(req.path, "/stops/search")
+        XCTAssertEqual(req.path, "/stops/v1/search")
         XCTAssertEqual(req.bodyJSON["q"] as? String, "Main")
         // country then city (fixed admin-key order); the quote in "Br\"no" is backslash-escaped.
         XCTAssertEqual(req.bodyJSON["filter"] as? String, #""country" = "CZ" AND "city" = "Br\"no""#)
@@ -172,6 +172,20 @@ final class RealtimeTests: XCTestCase {
         XCTAssertNil(error.field)
     }
 
+    func testRealtimeCallsUseTheirV1Paths() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        _ = try await client.realtime.vehicles(["T1"])
+        _ = try await client.realtime.vehicleForTrip("T1")
+        _ = try await client.realtime.delays(["T1"], serviceDate: "2026-01-01")
+        _ = try await client.realtime.alerts()
+        XCTAssertEqual(mock.requests.map { "\($0.httpMethod ?? "") \($0.path)" }, [
+            "GET /realtime/v1/vehicles",
+            "GET /realtime/v1/vehicles/by-trip/T1",
+            "POST /realtime/v1/delays",
+            "GET /realtime/v1/alerts",
+        ])
+    }
+
     func testVehicleForTrip404IsSoftNull() async throws {
         let (client, _) = makeClient { _ in json("{}", status: 404) }
         let result = try await client.realtime.vehicleForTrip("T1")
@@ -198,7 +212,7 @@ final class RealtimeTests: XCTestCase {
 
         // Grouped POST request body.
         let req = mock.requests[0]
-        XCTAssertEqual(req.path, "/realtime/delays")
+        XCTAssertEqual(req.path, "/realtime/v1/delays")
         XCTAssertEqual(req.httpMethod, "POST")
         let queries = req.bodyJSON["queries"] as! [[String: Any]]
         XCTAssertEqual(queries[0]["serviceDate"] as? String, "2026-01-01")

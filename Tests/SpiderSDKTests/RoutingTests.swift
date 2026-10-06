@@ -58,7 +58,7 @@ final class RoutingTests: XCTestCase {
 
         // Request: URL, method, headers, and the bare REST body.
         let req = mock.requests[0]
-        XCTAssertEqual(req.path, "/routing/plan")
+        XCTAssertEqual(req.path, "/routing/v1/plan")
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.2")
@@ -370,7 +370,7 @@ final class RoutingTests: XCTestCase {
         }
         guard case .success(let next)? = try await client.routing.planNext(first) else { return XCTFail("expected a next page") }
         XCTAssertEqual(next.pageInfo.startCursor, "c2")
-        XCTAssertEqual(mock.requests[1].path, "/routing/plan")
+        XCTAssertEqual(mock.requests[1].path, "/routing/v1/plan")
         var body = mock.requests[1].bodyJSON
         XCTAssertEqual(body.removeValue(forKey: "after") as? String, "c1")
         XCTAssertEqual(body as NSDictionary, mock.requests[0].bodyJSON as NSDictionary)
@@ -491,7 +491,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(bare.platformCode)
         XCTAssertNil(bare.wheelchairAccessible)
         XCTAssertNil(bare.typicalDelaySeconds)
-        XCTAssertEqual(mock.requests[0].path, "/routing/departures")
+        XCTAssertEqual(mock.requests[0].path, "/routing/v1/departures")
         XCTAssertEqual(mock.requests[0].bodyJSON["numberOfDepartures"] as? Int, 10)
     }
 
@@ -564,7 +564,7 @@ final class RoutingTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(body) }
         let result = try await client.routing.trip("T1", serviceDate: "2026-08-21")
         guard case .success(let trip) = result else { return XCTFail("expected success") }
-        XCTAssertEqual(mock.requests[0].path, "/routing/trip")
+        XCTAssertEqual(mock.requests[0].path, "/routing/v1/trip")
         XCTAssertEqual(mock.requests[0].httpMethod, "POST")
         XCTAssertEqual(mock.requests[0].bodyJSON as NSDictionary, ["id": "T1", "serviceDate": "2026-08-21"] as NSDictionary)
         XCTAssertEqual(trip.mode, .bus)

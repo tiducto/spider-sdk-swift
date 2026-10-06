@@ -244,7 +244,7 @@ private let MIN_STREAM_WINDOW_MINUTES = 120
 private let MAX_VIA_STOP_IDS = 10
 private let MAX_VIA_WAIT_SECONDS = 3_600
 private let NO_CURSOR = "NoCursor"
-private let PLAN_STREAM_PATH = "/routing/plan-stream"
+private let PLAN_STREAM_PATH = "/routing/v1/plan-stream"
 
 // The transit modes valid in a modes filter — the street/leg modes (WALK/BICYCLE/CAR/TRANSIT) must not reach it.
 private let WIRE_TRANSIT_MODES: Set<String> = [
@@ -367,7 +367,7 @@ public final class SpiderRouting {
                 timeRange: timeRangeSeconds,
                 startTime: startTime.map { Int($0.timeIntervalSince1970.rounded(.down)) }
             )
-            let response: DeparturesResponse = try await transport.postJson("/routing/departures", body)
+            let response: DeparturesResponse = try await transport.postJson("/routing/v1/departures", body)
             guard let stop = response.stop else {
                 throw TransportError(.noData, "routing returned no stop or station for id=\(stopId)")
             }
@@ -384,7 +384,7 @@ public final class SpiderRouting {
             return .failure(invalid("serviceDate"))
         }
         do {
-            let response: TripResponse = try await transport.postJson("/routing/trip", TripRequest(id: tripId, serviceDate: serviceDate))
+            let response: TripResponse = try await transport.postJson("/routing/v1/trip", TripRequest(id: tripId, serviceDate: serviceDate))
             guard let trip = response.trip else {
                 throw TransportError(.noData, "routing returned no trip for id=\(tripId)")
             }
@@ -434,7 +434,7 @@ public final class SpiderRouting {
             after: after,
             reliability: reliabilityInput(request.reliability)
         )
-        let plan: PlanTripResponse = try await transport.postJson("/routing/plan", body)
+        let plan: PlanTripResponse = try await transport.postJson("/routing/v1/plan", body)
         let pageInfo = RoutePageInfo(
             startCursor: plan.pageInfo.startCursor,
             endCursor: plan.pageInfo.endCursor,

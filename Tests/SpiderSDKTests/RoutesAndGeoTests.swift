@@ -6,7 +6,7 @@ final class StopsGeoTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(#"{"hits":[]}"#) }
         _ = try await client.stops.near(49.2, 16.6, radiusMeters: 300)
         let req = mock.requests[0]
-        XCTAssertEqual(req.path, "/stops/search")
+        XCTAssertEqual(req.path, "/stops/v1/search")
         XCTAssertEqual(req.bodyJSON["sort"] as? [String], ["_geoPoint(49.2, 16.6):asc"])
         XCTAssertEqual(req.bodyJSON["filter"] as? String, "_geoRadius(49.2, 16.6, 300.0)")
         XCTAssertEqual(req.bodyJSON["limit"] as? Int, 20)

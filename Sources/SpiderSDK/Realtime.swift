@@ -130,7 +130,7 @@ public final class SpiderRealtime {
         guard !tripIds.isEmpty else { return .success(EMPTY_POSITIONS) }
         guard tripIds.count <= MAX_TRIP_IDS else { return .failure(outOfRange("tripIds")) }
         do {
-            let dto: VehiclesResponse = try await transport.getJson("/realtime/vehicles", query: [("tripIds", tripIds.joined(separator: ","))])
+            let dto: VehiclesResponse = try await transport.getJson("/realtime/v1/vehicles", query: [("tripIds", tripIds.joined(separator: ","))])
             let positions = VehiclePositions(
                 vehicles: (dto.vehicles ?? []).map(mapVehicle),
                 missing: dto.missing ?? [],
@@ -146,7 +146,7 @@ public final class SpiderRealtime {
     public func vehicleForTrip(_ tripId: String) async throws -> SpiderResult<LiveVehicleUpdate> {
         do {
             let encoded = tripId.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed) ?? tripId
-            let path = "/realtime/vehicles/by-trip/\(encoded)"
+            let path = "/realtime/v1/vehicles/by-trip/\(encoded)"
             let raw = try await transport.getRaw(path)
             if !raw.ok, let limit = planLimitError(status: raw.status, envelope: parseErrorEnvelope(raw.text)) {
                 throw limit
@@ -158,7 +158,7 @@ public final class SpiderRealtime {
                 let detail = String(raw.text.prefix(300))
                 throw TransportError(.http, "GET \(path) -> \(raw.status): \(detail)", httpStatus: raw.status, field: validationField(detail))
             }
-            let dto: VehicleByTripResponse = try decode(from: raw.data, where: "GET /realtime/vehicles/by-trip")
+            let dto: VehicleByTripResponse = try decode(from: raw.data, where: "GET /realtime/v1/vehicles/by-trip")
             return .success(LiveVehicleUpdate(
                 vehicle: dto.vehicle.map(mapVehicle),
                 freshness: mapFreshness(dto.feedTimestamp, dto.staleSeconds)
@@ -182,7 +182,7 @@ public final class SpiderRealtime {
         guard tripIdCount <= MAX_TRIP_IDS else { return .failure(outOfRange("tripIds")) }
         do {
             let body = DelaysRequest(queries: byServiceDate.map { DelayQuery(serviceDate: $0.key, tripIds: $0.value) })
-            let dto: DelaysResponse = try await transport.postJson("/realtime/delays", body)
+            let dto: DelaysResponse = try await transport.postJson("/realtime/v1/delays", body)
             let delays = TripDelays(
                 groups: (dto.results ?? []).map(mapDelayGroup),
                 freshness: mapFreshness(dto.feedTimestamp, dto.staleSeconds)
@@ -201,7 +201,7 @@ public final class SpiderRealtime {
     /// All active service alerts for the environment.
     public func alerts() async throws -> SpiderResult<ServiceAlerts> {
         do {
-            let dto: AlertsResponse = try await transport.getJson("/realtime/alerts")
+            let dto: AlertsResponse = try await transport.getJson("/realtime/v1/alerts")
             let alerts = ServiceAlerts(
                 alerts: (dto.alerts ?? []).map(mapAlert),
                 freshness: mapFreshness(dto.feedTimestamp, dto.staleSeconds)
@@ -314,7 +314,7 @@ private struct DelayDto: Decodable {
     let stopTimeUpdates: [StopTimeUpdateDto]?
 }
 
-// Grouped, service-date-scoped request body for POST /realtime/delays.
+// Grouped, service-date-scoped request body for POST /realtime/v1/delays.
 private struct DelayQuery: Encodable {
     let serviceDate: String
     let tripIds: [String]
