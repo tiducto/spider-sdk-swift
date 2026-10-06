@@ -19,8 +19,8 @@ and this version's routing calls need contract 2.0. Stops and realtime are unaff
   `<field> is required|invalid|out of range|not allowed` message names, dot paths included.
 - **A via visit to a coordinate fails before any request**, as `.badRequest` `via is invalid` (field `via`), the
   answer the server always gave. Visit a stop: `.visit(.stop(id), minimumWaitSeconds:)`.
-- **A via visit's `minimumWaitSeconds` is 0 to 3 600 (1 h)**; more fails as `.badRequest` `via is out of range`
-  without a request.
+- **A via visit's `minimumWaitSeconds` is 0 to 3 600 (1 h)**; outside that it fails as `.badRequest`
+  `via.visit.minimumWaitTime is out of range` (field `via.visit.minimumWaitTime`) without a request.
 - **Plan streams.** A stream that ends before its `.done` (the connection dropped) ends with a `.failure`
   (`.server`). Events this SDK doesn't know are skipped, so new events are additive. A malformed event's
   `.failure` is the last event of its stream.

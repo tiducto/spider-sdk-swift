@@ -186,18 +186,20 @@ final class RoutingTests: XCTestCase {
     func testPlanRejectsViaOutsideFixedLimitsWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let eleven = (1...11).map { "1:V\($0)" }
-        let invalid: [ViaLocation] = [
-            .passThrough(stopIds: []),
-            .passThrough(stopIds: eleven),
-            .visit(.stop("1:V"), minimumWaitSeconds: -1),
-            .visit(.stop("1:V"), minimumWaitSeconds: 3_601),
+        let wait = "via.visit.minimumWaitTime"
+        let invalid: [(ViaLocation, String)] = [
+            (.passThrough(stopIds: []), "via"),
+            (.passThrough(stopIds: eleven), "via"),
+            (.visit(.stop("1:V"), minimumWaitSeconds: -1), wait),
+            (.visit(.stop("1:V"), minimumWaitSeconds: 3_601), wait),
+            (.visit(.coordinate(49.2, 16.6), minimumWaitSeconds: 3_601), wait),
         ]
-        for via in invalid {
+        for (via, field) in invalid {
             let result = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), via: [via]))
             guard case .failure(let error) = result else { return XCTFail("expected failure for \(via)") }
             XCTAssertEqual(error.code, .badRequest)
-            XCTAssertEqual(error.field, "via")
-            XCTAssertEqual(error.message, "via is out of range")
+            XCTAssertEqual(error.field, field)
+            XCTAssertEqual(error.message, "\(field) is out of range")
         }
         XCTAssertTrue(mock.requests.isEmpty)
     }

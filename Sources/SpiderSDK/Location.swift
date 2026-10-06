@@ -27,7 +27,8 @@ public enum ViaLocation: Sendable, Equatable {
     }
 
     /// Require the route to visit a stop, optionally dwelling at least `minimumWaitSeconds` (0 to 1 h) there. A
-    /// coordinate is rejected as `.badRequest` (field `via`) without a request.
+    /// coordinate is rejected as `.badRequest` (field `via`), a wait outside 0 to 1 h as `.badRequest` (field
+    /// `via.visit.minimumWaitTime`), both without a request.
     public static func visit(_ location: Location, minimumWaitSeconds: Int = 0) -> ViaLocation {
         .visit(location: location, minimumWaitSeconds: minimumWaitSeconds)
     }

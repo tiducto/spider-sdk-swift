@@ -407,11 +407,13 @@ final class RoutingStreamTests: XCTestCase {
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
         let viaOptions = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.passThrough(stopIds: [])])
         let coordinateVisit = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.visit(.coordinate(49.2, 16.6))])
+        let longVisit = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.visit(.stop("1:V"), minimumWaitSeconds: 3_601)])
         let cases: [(AsyncStream<PlanStreamEvent>, String, String)] = [
             (client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 119), "maxWindow", "maxWindow is out of range"),
             (client.routing.planStreamNext(options, targetResults: 5, maxWindowMinutes: 0, after: "c"), "maxWindow", "maxWindow is out of range"),
             (client.routing.planStreamPrevious(options, targetResults: 5, maxWindowMinutes: -120, before: "c"), "maxWindow", "maxWindow is out of range"),
             (client.routing.planStream(viaOptions, targetResults: 5, maxWindowMinutes: 120), "via", "via is out of range"),
+            (client.routing.planStream(longVisit, targetResults: 5, maxWindowMinutes: 120), "via.visit.minimumWaitTime", "via.visit.minimumWaitTime is out of range"),
             (client.routing.planStream(coordinateVisit, targetResults: 5, maxWindowMinutes: 120), "via", "via is invalid"),
             (client.routing.planStreamNext(coordinateVisit, targetResults: 5, maxWindowMinutes: 120, after: "c"), "via", "via is invalid"),
         ]

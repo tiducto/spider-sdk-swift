@@ -266,9 +266,9 @@ public final class SpiderRouting {
         self.transport = transport
     }
 
-    /// Plans a trip. Returns the first window of itineraries. A via location outside its fixed limits (1–10
-    /// stop ids, a `minimumWaitSeconds` from 0 to 1 h) or a visit to a coordinate fails as `.badRequest` (field
-    /// `via`) without a request.
+    /// Plans a trip. Returns the first window of itineraries. A via location outside its fixed limits fails as
+    /// `.badRequest` without a request: a pass-through without 1–10 stop ids or a visit to a coordinate on field
+    /// `via`, a `minimumWaitSeconds` outside 0 to 1 h on field `via.visit.minimumWaitTime`.
     public func plan(_ options: PlanOptions) async throws -> SpiderResult<Route> {
         try await page(makeRequest(options))
     }
@@ -588,10 +588,9 @@ private func viaInputs(_ via: [ViaLocation]) throws -> [PlanViaLocationInput]? {
         case .passThrough(let stopIds):
             guard (1...MAX_VIA_STOP_IDS).contains(stopIds.count) else { throw outOfRange("via") }
             return PlanViaLocationInput(passThrough: PlanPassThroughViaLocationInput(stopLocationIds: stopIds))
-        case .visit(.coordinate, _):
-            throw invalid("via")
-        case .visit(.stop(let id), let minimumWaitSeconds):
-            guard (0...MAX_VIA_WAIT_SECONDS).contains(minimumWaitSeconds) else { throw outOfRange("via") }
+        case .visit(let place, let minimumWaitSeconds):
+            guard (0...MAX_VIA_WAIT_SECONDS).contains(minimumWaitSeconds) else { throw outOfRange("via.visit.minimumWaitTime") }
+            guard case .stop(let id) = place else { throw invalid("via") }
             let wait = minimumWaitSeconds > 0 ? "PT\(minimumWaitSeconds)S" : nil
             return PlanViaLocationInput(visit: PlanVisitViaLocationInput(stopLocationIds: [id], minimumWaitTime: wait))
         }
