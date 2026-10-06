@@ -16,7 +16,7 @@ public enum Location: Sendable, Equatable {
     }
 }
 
-/// A via constraint on a trip plan: pass through a set of stops, or visit a place with a minimum dwell.
+/// A via constraint on a trip plan: pass through a set of stops, or visit a stop with a minimum dwell.
 public enum ViaLocation: Sendable, Equatable {
     case passThrough(stopIds: [String])
     case visit(location: Location, minimumWaitSeconds: Int)
@@ -26,7 +26,8 @@ public enum ViaLocation: Sendable, Equatable {
         .passThrough(stopIds: stopIds)
     }
 
-    /// Require the route to visit a place, optionally dwelling at least `minimumWaitSeconds` (0 to 24 h) there.
+    /// Require the route to visit a stop, optionally dwelling at least `minimumWaitSeconds` (0 to 1 h) there. A
+    /// coordinate is rejected as `.badRequest` (field `via`) without a request.
     public static func visit(_ location: Location, minimumWaitSeconds: Int = 0) -> ViaLocation {
         .visit(location: location, minimumWaitSeconds: minimumWaitSeconds)
     }

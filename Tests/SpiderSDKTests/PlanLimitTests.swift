@@ -61,6 +61,21 @@ final class PlanLimitTests: XCTestCase {
         }
     }
 
+    // The refusal may name itself in `code` (alongside or instead of `error`); `code` decides.
+    func testPlanLimitCodeIsReadFromCodeOrError() async throws {
+        let bodies: [(body: String, code: SpiderErrorCode)] = [
+            (#"{"code":"planning_limit_reached","message":"trip planning limit reached"}"#, .planningLimitReached),
+            (#"{"code":"agreement_inactive","error":"agreement_inactive","message":"agreement is not active"}"#, .agreementInactive),
+            (#"{"code":"forbidden","error":"planning_limit_reached","message":"access denied"}"#, .unauthorized),
+        ]
+        for (body, code) in bodies {
+            for (surface, error) in try await surfaceErrors(json(body, status: 403)) {
+                XCTAssertEqual(error.code, code, "\(surface) with body \(body)")
+                XCTAssertEqual(error.httpStatus, 403, surface)
+            }
+        }
+    }
+
     // A proxy may rewrite the status: the body code still decides, over the 400/404/410/500 mappings and over the
     // realtime by-trip 404 that otherwise means "no vehicle". The rewritten status is carried as received.
     func testBodyCodeWinsOverRewrittenStatus() async throws {
