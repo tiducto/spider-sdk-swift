@@ -29,11 +29,11 @@ func setupWithRetry() -> SpiderClient {
 /// A hand-rolled poll loop: fetch delays roughly every 15 seconds until the task is cancelled.
 func poll(client: SpiderClient) async throws {
     // [START poll]
-    // Group trip ids by the GTFS service date they run on — take it from each plan leg's `serviceDate`.
-    let tripIds = ["T-1", "T-2"]
+    // One GTFS service date per call — take it from each plan leg's `serviceDate`; ids are feed-prefixed.
+    let tripIds = ["1:T-1", "1:T-2"]
     let serviceDate = "2026-01-01"
     while !Task.isCancelled {
-        switch try await client.realtime.delays(tripIds, serviceDate: serviceDate) {
+        switch try await client.realtime.delays(serviceDate: serviceDate, tripIds: tripIds) {
         case .success(let delays):
             updateBoard(delays)
         case .failure(let error):
@@ -47,10 +47,10 @@ func poll(client: SpiderClient) async throws {
 /// A change-detecting stream of vehicle positions via the SDK's built-in polling helper (yields only when the data changes).
 func pollHelper(client: SpiderClient) async throws {
     // [START pollHelper]
-    for try await update in client.realtime.pollVehicles(["T-1", "T-2"], intervalMs: 15_000) {
+    for try await update in client.realtime.pollVehicles(["1:T-1", "1:T-2"], intervalMs: 15_000) {
         if case .success(let positions) = update {
             for vehicle in positions.vehicles {
-                placeMarker(lat: vehicle.latitude ?? 0, lon: vehicle.longitude ?? 0)
+                placeMarker(lat: vehicle.latitude, lon: vehicle.longitude)
             }
         }
     }
@@ -60,10 +60,10 @@ func pollHelper(client: SpiderClient) async throws {
 /// Fetch live vehicle positions for a set of trips.
 func vehicles(client: SpiderClient) async throws {
     // [START vehicles]
-    let result = try await client.realtime.vehicles(["T-1", "T-2"])
+    let result = try await client.realtime.vehicles(["1:T-1", "1:T-2"])
     if case .success(let positions) = result {
         for vehicle in positions.vehicles {
-            print("\(vehicle.tripId ?? "?") at \(vehicle.latitude ?? 0),\(vehicle.longitude ?? 0)")
+            print("\(vehicle.tripId) at \(vehicle.latitude),\(vehicle.longitude)")
         }
     }
     // [END vehicles]
@@ -75,7 +75,7 @@ func vehicleForTrip(client: SpiderClient, tripId: String) async throws {
     let result = try await client.realtime.vehicleForTrip(tripId)
     if case .success(let update) = result {
         if let vehicle = update.vehicle {
-            placeMarker(lat: vehicle.latitude ?? 0, lon: vehicle.longitude ?? 0)
+            placeMarker(lat: vehicle.latitude, lon: vehicle.longitude)
         } else {
             log("no vehicle currently reporting for \(tripId)")
         }
@@ -87,14 +87,13 @@ func vehicleForTrip(client: SpiderClient, tripId: String) async throws {
 func delays(client: SpiderClient) async throws {
     // [START delays]
     // Delays are per trip instance — pass the GTFS service date (`YYYY-MM-DD`) the trips run on.
-    let result = try await client.realtime.delays(["T-1", "T-2"], serviceDate: "2026-01-01")
+    let result = try await client.realtime.delays(serviceDate: "2026-01-01", tripIds: ["1:T-1", "1:T-2"])
     if case .success(let trips) = result {
-        for group in trips.groups {
-            for delay in group.delays {
-                let minutes = (delay.delaySeconds ?? 0) / 60
-                let sign = minutes >= 0 ? "+" : ""
-                print("\(delay.tripId ?? "?"): \(sign)\(minutes) min")
-            }
+        for delay in trips.delays {
+            guard let seconds = delay.delaySeconds else { continue }
+            let minutes = seconds / 60
+            let sign = minutes >= 0 ? "+" : ""
+            print("\(delay.tripId): \(sign)\(minutes) min")
         }
     }
     // [END delays]

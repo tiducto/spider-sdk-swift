@@ -13,17 +13,18 @@ final class RoutingStreamTests: XCTestCase {
           "results": [
             {
               "numberOfTransfers": 1,
-              "start": "2026-07-15T08:00:00Z", "end": "2026-07-15T08:30:00Z", "duration": 1800,
+              "start": "2026-07-15T08:00:00Z", "end": "2026-07-15T08:30:00Z", "duration": 1800, "waitingTime": 0,
               "legs": [
                 {
                   "mode": "BUS",
                   "start": { "scheduledTime": "2026-07-15T08:00:00Z", "estimated": { "time": "2026-07-15T08:01:00Z", "delay": "PT60S" } },
                   "end":   { "scheduledTime": "2026-07-15T08:30:00Z", "estimated": { "time": "2026-07-15T08:32:00Z", "delay": "PT120S" } },
                   "realtimeState": "UPDATED", "realTime": true, "serviceDate": "2026-07-15",
-                  "from": { "name": "Origin", "stop": { "gtfsId": "1:A" } },
-                  "to":   { "name": "Dest",   "stop": { "gtfsId": "1:B" } },
-                  "route": { "gtfsId": "1:R12", "shortName": "12" }, "trip": { "gtfsId": "1:T" },
-                  "typicalArrivalDelay": 150, "interlineWithPreviousLeg": true
+                  "from": { "name": "Origin", "stop": { "gtfsId": "1:A", "wheelchairBoarding": "POSSIBLE" } },
+                  "to":   { "name": "Dest",   "stop": { "gtfsId": "1:B", "wheelchairBoarding": "NO_INFORMATION" } },
+                  "route": { "gtfsId": "1:R12", "shortName": "12" }, "trip": { "gtfsId": "1:T", "bikesAllowed": "ALLOWED" },
+                  "headsign": "Dest", "distance": 9000.0, "duration": 1800,
+                  "typicalArrivalDelay": 150, "interlineWithPreviousLeg": true, "legGeometry": { "points": "_p~iF~ps|U" }
                 }
               ]
             }
@@ -233,7 +234,7 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "accept"), "text/event-stream")
         XCTAssertEqual(request.value(forHTTPHeaderField: "content-type"), "application/json")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "x-spider-contract-version"), "1.2")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-spider-contract-version"), "1.3")
         let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(StubStreamProtocol.requestBody)) as? [String: Any])
         XCTAssertNil(body["id"])
         XCTAssertNil(body["variables"])
@@ -256,7 +257,7 @@ final class RoutingStreamTests: XCTestCase {
         data: {"frontier":600}
 
         event: chunk
-        data: {"frontier":1200,"found":1,"finalized":1,"results":[{"numberOfTransfers":0,"legs":[]}]}
+        data: {"frontier":1200,"found":1,"finalized":1,"results":[{"start":"2026-07-15T08:00:00Z","end":"2026-07-15T08:30:00Z","duration":1800,"waitingTime":0,"numberOfTransfers":0,"legs":[]}]}
 
         event: error
         data: {"data":null,"errors":[{"message":"boom"}]}
@@ -282,7 +283,7 @@ final class RoutingStreamTests: XCTestCase {
     func testPlanStreamCutBeforePageInfoIsANetworkFailure() async throws {
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
-        let chunk = "event: chunk\ndata: {\"frontier\":1200,\"found\":1,\"finalized\":1,\"results\":[{\"numberOfTransfers\":0,\"legs\":[]}]}\n\n"
+        let chunk = "event: chunk\ndata: {\"frontier\":1200,\"found\":1,\"finalized\":1,\"results\":[{\"start\":\"2026-07-15T08:00:00Z\",\"end\":\"2026-07-15T08:30:00Z\",\"duration\":1800,\"waitingTime\":0,\"numberOfTransfers\":0,\"legs\":[]}]}\n\n"
         let pageInfo = "event: pageInfo\ndata: {\"hasNextPage\":false,\"hasPreviousPage\":false,\"routingErrors\":[]}\n"
         let cases: [(body: String, results: Int)] = [
             (chunk, 1),
@@ -318,17 +319,6 @@ final class RoutingStreamTests: XCTestCase {
 
         guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
         XCTAssertEqual(error.code, .decoding)
-    }
-
-    func testPlanStreamBare410IsQueryRetired() async throws {
-        StubStreamProtocol.respond(status: 410, contentType: "application/json", body: "")
-        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
-        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
-        let events = await collect(client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120))
-
-        guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
-        XCTAssertEqual(error.code, .queryRetired)
-        XCTAssertEqual(error.httpStatus, 410)
     }
 
     // A plan-limit refusal is the gateway's plain JSON 403, sent before the stream opens; the stream ends with the

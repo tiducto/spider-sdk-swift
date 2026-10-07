@@ -36,7 +36,7 @@ func handleResult(client: SpiderClient) async throws {
     case .success(let route):
         for edge in route.edges {
             let itinerary = edge.itinerary
-            let legs = itinerary.legs.map { $0.mode?.rawValue ?? "WALK" }.joined(separator: " → ")
+            let legs = itinerary.legs.map { $0.mode.rawValue }.joined(separator: " → ")
             print("\(itinerary.durationSeconds / 60) min, \(itinerary.numberOfTransfers) transfers: \(legs)")
         }
     case .failure(let error):

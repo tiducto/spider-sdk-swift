@@ -31,9 +31,9 @@ final class PlanLimitTests: XCTestCase {
         } catch let error as SpiderError {
             errors.append(("stops.byId", error))
         }
-        record("realtime.vehicles", try await client.realtime.vehicles(["T1"]))
-        record("realtime.vehicleForTrip", try await client.realtime.vehicleForTrip("T1"))
-        record("realtime.delays", try await client.realtime.delays(["T1"], serviceDate: "2026-01-01"))
+        record("realtime.vehicles", try await client.realtime.vehicles(["1:T1"]))
+        record("realtime.vehicleForTrip", try await client.realtime.vehicleForTrip("1:T1"))
+        record("realtime.delays", try await client.realtime.delays(serviceDate: "2026-01-01", tripIds: ["1:T1"]))
         record("realtime.alerts", try await client.realtime.alerts())
         XCTAssertEqual(errors.map(\.0), Self.surfaces)
         return errors
@@ -75,7 +75,7 @@ final class PlanLimitTests: XCTestCase {
         }
     }
 
-    // A proxy may rewrite the status: the body code still decides, over the 400/404/410/500 mappings and over the
+    // A proxy may rewrite the status: the body code still decides, over the 400/404/500 mappings and over the
     // realtime by-trip 404 that otherwise means "no vehicle". The rewritten status is carried as received.
     func testBodyCodeWinsOverRewrittenStatus() async throws {
         let cases: [(body: String, code: SpiderErrorCode, message: String)] = [
@@ -83,7 +83,7 @@ final class PlanLimitTests: XCTestCase {
             (agreementBody, .agreementInactive, "agreement is not active"),
         ]
         for (body, code, message) in cases {
-            for status in [400, 401, 404, 410, 429, 500] {
+            for status in [400, 401, 404, 429, 500] {
                 for (surface, error) in try await surfaceErrors(json(body, status: status)) {
                     let label = "\(surface) on \(status)"
                     XCTAssertEqual(error.code, code, label)

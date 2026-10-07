@@ -14,8 +14,8 @@ public struct Stop: Sendable, Equatable {
     /// The modes of the routes serving the stop (a station's cover all its platforms), each once. Empty when no
     /// route serves it. A mode this SDK doesn't know is `.unknown`.
     public let modes: [TransitMode]
-    public let lat: Double?
-    public let lon: Double?
+    public let lat: Double
+    public let lon: Double
     public let country: String?
     public let region: String?
     public let district: String?
@@ -235,7 +235,7 @@ private struct StopSearchRequest: Encodable {
 
 private struct StopSearchResponse: Decodable {
     let hits: [StopHit]
-    let query: String?
+    let query: String
 }
 
 private struct StopHit: Decodable {
@@ -245,8 +245,8 @@ private struct StopHit: Decodable {
     let locationType: Int?
     let wheelchairBoarding: Int?
     let modes: [String]?
-    let lat: Double?
-    let lon: Double?
+    let lat: Double
+    let lon: Double
     let country: String?
     let region: String?
     let district: String?

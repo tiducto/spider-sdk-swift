@@ -3,7 +3,7 @@ import XCTest
 
 final class StopsGeoTests: XCTestCase {
     func testNearSetsDistanceSortAndGeoRadius() async throws {
-        let (client, mock) = makeClient { _ in json(#"{"hits":[]}"#) }
+        let (client, mock) = makeClient { _ in json(#"{"hits":[],"query":""}"#) }
         _ = try await client.stops.near(49.2, 16.6, radiusMeters: 300)
         let req = mock.requests[0]
         XCTAssertEqual(req.path, "/stops/v1/search")
@@ -13,13 +13,13 @@ final class StopsGeoTests: XCTestCase {
     }
 
     func testWithinBuildsBoundingBoxFilter() async throws {
-        let (client, mock) = makeClient { _ in json(#"{"hits":[]}"#) }
+        let (client, mock) = makeClient { _ in json(#"{"hits":[],"query":""}"#) }
         _ = try await client.stops.within(GeoBoundingBox(minLat: 49.1, minLng: 16.5, maxLat: 49.3, maxLng: 16.7))
         XCTAssertEqual(mock.requests[0].bodyJSON["filter"] as? String, "_geoBoundingBox([49.3, 16.7], [49.1, 16.5])")
     }
 
     func testStopByIdBuildsGtfsIdFilterAndReturnsHit() async throws {
-        let body = #"{"hits":[{"gtfsId":"U123Z1","name":"Main","city":"Brno"}]}"#
+        let body = #"{"hits":[{"gtfsId":"U123Z1","name":"Main","lat":49.19,"lon":16.61,"city":"Brno"}],"query":""}"#
         let (client, mock) = makeClient { _ in json(body) }
         let stop = try await client.stops.byId("U123Z1")
         XCTAssertEqual(stop?.gtfsId, "U123Z1")
@@ -29,13 +29,13 @@ final class StopsGeoTests: XCTestCase {
     }
 
     func testStopByIdReturnsNilWhenNoHit() async throws {
-        let (client, _) = makeClient { _ in json(#"{"hits":[]}"#) }
+        let (client, _) = makeClient { _ in json(#"{"hits":[],"query":""}"#) }
         let stop = try await client.stops.byId("nope")
         XCTAssertNil(stop)
     }
 
     func testRadiusWithoutAnchorFailsWithoutRequest() async throws {
-        let (client, mock) = makeClient { _ in json(#"{"hits":[]}"#) }
+        let (client, mock) = makeClient { _ in json(#"{"hits":[],"query":""}"#) }
         let result = try await client.stops.search(StopFilter(radiusMeters: 300))
         guard case .failure(let error) = result else { return XCTFail("expected failure") }
         XCTAssertTrue(error.message.contains("`near`"))

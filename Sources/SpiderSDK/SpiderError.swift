@@ -9,8 +9,6 @@ public enum SpiderErrorCode: String, Sendable {
     case notFound = "not_found"
     case server
     case rateLimited = "rate_limited"
-    /// HTTP 410: the API no longer serves the part of it this SDK version calls; upgrade the SDK.
-    case queryRetired = "query_retired"
     /// The project has reached the trip-planning limit its plan includes: the API refuses plan and plan stream.
     case planningLimitReached = "planning_limit_reached"
     /// The project's agreement is not active: the API refuses every call made with the key.
@@ -99,7 +97,6 @@ func parseErrorEnvelope(_ text: String) -> ErrorEnvelope {
     )
 }
 
-let QUERY_RETIRED = "query_retired"
 let PLANNING_LIMIT_REACHED = "planning_limit_reached"
 let AGREEMENT_INACTIVE = "agreement_inactive"
 
@@ -143,6 +140,10 @@ func outOfRange(_ field: String) -> SpiderError {
     SpiderError(code: .badRequest, message: "\(field) is out of range", field: field)
 }
 
+func required(_ field: String) -> SpiderError {
+    SpiderError(code: .badRequest, message: "\(field) is required", field: field)
+}
+
 func invalid(_ field: String) -> SpiderError {
     SpiderError(code: .badRequest, message: "\(field) is invalid", field: field)
 }
@@ -158,11 +159,9 @@ func toSpiderError(_ error: Error) -> SpiderError {
             switch status {
             case _ where te.serverCode == PLANNING_LIMIT_REACHED: code = .planningLimitReached
             case _ where te.serverCode == AGREEMENT_INACTIVE: code = .agreementInactive
-            case _ where te.serverCode == QUERY_RETIRED: code = .queryRetired
             case 400: code = .badRequest
             case 401, 403: code = .unauthorized
             case 404: code = .notFound
-            case 410: code = .queryRetired
             case 408, 504: code = .timeout
             case 429: code = .rateLimited
             case 500...599: code = .server
