@@ -2,19 +2,19 @@
 public struct DepartureBoard: Codable, Sendable {
     public let gtfsId: String
     public let name: String
-    /// Null on a station board.
-    public let wheelchairBoarding: AnyCodable
     public let stoptimesWithoutPatterns: [StopDeparturesStoptime]
+    /// Null on a station board.
+    public let wheelchairBoarding: WheelchairBoarding?
 
     public init(
         gtfsId: String,
         name: String,
-        wheelchairBoarding: AnyCodable,
-        stoptimesWithoutPatterns: [StopDeparturesStoptime]
+        stoptimesWithoutPatterns: [StopDeparturesStoptime],
+        wheelchairBoarding: WheelchairBoarding? = nil
     ) {
         self.gtfsId = gtfsId
         self.name = name
-        self.wheelchairBoarding = wheelchairBoarding
         self.stoptimesWithoutPatterns = stoptimesWithoutPatterns
+        self.wheelchairBoarding = wheelchairBoarding
     }
 }

@@ -1,9 +1,9 @@
 /// Accessibility preferences.
 public struct AccessibilityPreferencesInput: Codable, Sendable {
-    public let wheelchair: AnyCodable?
+    public let wheelchair: WheelchairPreferencesInput?
 
     public init(
-        wheelchair: AnyCodable? = nil
+        wheelchair: WheelchairPreferencesInput? = nil
     ) {
         self.wheelchair = wheelchair
     }

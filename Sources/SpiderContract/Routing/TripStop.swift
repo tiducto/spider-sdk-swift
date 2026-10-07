@@ -5,9 +5,9 @@ public struct TripStop: Codable, Sendable {
     public let lon: Double
     public let wheelchairBoarding: WheelchairBoarding
     /// Null when the feed has none.
-    public let platformCode: String
+    public let platformCode: String?
     /// Null when the feed has none.
-    public let zoneId: String
+    public let zoneId: String?
 
     public init(
         gtfsId: String,
@@ -15,8 +15,8 @@ public struct TripStop: Codable, Sendable {
         lat: Double,
         lon: Double,
         wheelchairBoarding: WheelchairBoarding,
-        platformCode: String,
-        zoneId: String
+        platformCode: String? = nil,
+        zoneId: String? = nil
     ) {
         self.gtfsId = gtfsId
         self.name = name

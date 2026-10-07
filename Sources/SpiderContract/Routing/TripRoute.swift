@@ -1,27 +1,27 @@
 public struct TripRoute: Codable, Sendable {
     public let gtfsId: String
-    /// Null when the feed has none.
-    public let shortName: String
-    /// Null when the feed has none.
-    public let longName: String
     public let mode: TransitMode
+    /// Null when the feed has none.
+    public let shortName: String?
+    /// Null when the feed has none.
+    public let longName: String?
     /// Hex without `#`; null when the feed has none.
-    public let color: String
+    public let color: String?
     /// Hex without `#`; null when the feed has none.
-    public let textColor: String
+    public let textColor: String?
 
     public init(
         gtfsId: String,
-        shortName: String,
-        longName: String,
         mode: TransitMode,
-        color: String,
-        textColor: String
+        shortName: String? = nil,
+        longName: String? = nil,
+        color: String? = nil,
+        textColor: String? = nil
     ) {
         self.gtfsId = gtfsId
+        self.mode = mode
         self.shortName = shortName
         self.longName = longName
-        self.mode = mode
         self.color = color
         self.textColor = textColor
     }

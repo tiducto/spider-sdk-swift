@@ -1,11 +1,11 @@
 public struct LegTime: Codable, Sendable {
     public let scheduledTime: String
     /// Null without realtime.
-    public let estimated: AnyCodable
+    public let estimated: RealTimeEstimate?
 
     public init(
         scheduledTime: String,
-        estimated: AnyCodable
+        estimated: RealTimeEstimate? = nil
     ) {
         self.scheduledTime = scheduledTime
         self.estimated = estimated

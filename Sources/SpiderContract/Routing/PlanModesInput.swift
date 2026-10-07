@@ -4,12 +4,12 @@ public struct PlanModesInput: Codable, Sendable {
     public let directOnly: Bool?
     /// Never a journey without a transit leg.
     public let transitOnly: Bool?
-    public let transit: AnyCodable?
+    public let transit: PlanTransitModesInput?
 
     public init(
         directOnly: Bool? = nil,
         transitOnly: Bool? = nil,
-        transit: AnyCodable? = nil
+        transit: PlanTransitModesInput? = nil
     ) {
         self.directOnly = directOnly
         self.transitOnly = transitOnly

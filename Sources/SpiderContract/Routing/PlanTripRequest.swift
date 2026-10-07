@@ -9,8 +9,8 @@ public struct PlanTripRequest: Codable, Sendable {
     public let searchWindow: String
     /// Locations the journey must visit or pass through, in the order given, all of one kind: every entry `visit` or every entry `passThrough`; mixing them is a 400 `via is invalid`. How many a request takes is an environment setting, and an environment set to 0 has via turned off; more is a 400 `via is out of range`. A via stop id that resolves to no stop or station is a 200 with the `routingErrors` code `LOCATION_NOT_FOUND` on `VIA`.
     public let via: [PlanViaLocationInput]?
-    public let modes: AnyCodable?
-    public let preferences: AnyCodable?
+    public let modes: PlanModesInput?
+    public let preferences: PlanPreferencesInput?
     /// Itineraries on this page: 1 up to the environment's itinerary limit; rejected, never clamped. Absent means the limit. With `after` or no cursor, never with `before`.
     public let first: Int?
     /// Itineraries on the previous page: 1 up to the environment's itinerary limit; rejected, never clamped. Absent means the limit. Only with `before`.
@@ -20,7 +20,7 @@ public struct PlanTripRequest: Codable, Sendable {
     /// `pageInfo.endCursor` of a page, to fetch the page after it. Never with `before`. A `startCursor` here is a 400 `after is invalid`.
     public let after: String?
     /// Delay-aware planning level; omitted or null plans on the timetable alone.
-    public let reliability: AnyCodable?
+    public let reliability: Reliability?
 
     public init(
         dateTime: PlanDateTimeInput,
@@ -28,13 +28,13 @@ public struct PlanTripRequest: Codable, Sendable {
         destination: PlanLabeledLocationInput,
         searchWindow: String,
         via: [PlanViaLocationInput]? = nil,
-        modes: AnyCodable? = nil,
-        preferences: AnyCodable? = nil,
+        modes: PlanModesInput? = nil,
+        preferences: PlanPreferencesInput? = nil,
         first: Int? = nil,
         last: Int? = nil,
         before: String? = nil,
         after: String? = nil,
-        reliability: AnyCodable? = nil
+        reliability: Reliability? = nil
     ) {
         self.dateTime = dateTime
         self.origin = origin

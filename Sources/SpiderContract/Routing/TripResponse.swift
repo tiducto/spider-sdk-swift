@@ -1,9 +1,9 @@
 /// `trip` is null for an id that resolves to no trip.
 public struct TripResponse: Codable, Sendable {
-    public let trip: AnyCodable
+    public let trip: TripTimetable?
 
     public init(
-        trip: AnyCodable
+        trip: TripTimetable? = nil
     ) {
         self.trip = trip
     }

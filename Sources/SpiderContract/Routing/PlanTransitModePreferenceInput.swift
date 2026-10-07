@@ -1,11 +1,11 @@
 /// A transit mode the search may use.
 public struct PlanTransitModePreferenceInput: Codable, Sendable {
     public let mode: TransitMode
-    public let cost: AnyCodable?
+    public let cost: TransitModePreferenceCostInput?
 
     public init(
         mode: TransitMode,
-        cost: AnyCodable? = nil
+        cost: TransitModePreferenceCostInput? = nil
     ) {
         self.mode = mode
         self.cost = cost
