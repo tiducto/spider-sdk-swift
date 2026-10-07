@@ -1,9 +1,9 @@
-/// `stop` is the board, or null for an id that is neither a stop nor a station.
+/// `stop` is the board, or null for an id that resolves to no stop or station.
 public struct DeparturesResponse: Codable, Sendable {
-    public let stop: DepartureBoard?
+    public let stop: AnyCodable
 
     public init(
-        stop: DepartureBoard? = nil
+        stop: AnyCodable
     ) {
         self.stop = stop
     }

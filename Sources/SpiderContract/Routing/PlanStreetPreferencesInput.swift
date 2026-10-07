@@ -1,9 +1,9 @@
 /// Street preferences, for walking to, from and between stops.
 public struct PlanStreetPreferencesInput: Codable, Sendable {
-    public let walk: WalkPreferencesInput?
+    public let walk: AnyCodable?
 
     public init(
-        walk: WalkPreferencesInput? = nil
+        walk: AnyCodable? = nil
     ) {
         self.walk = walk
     }

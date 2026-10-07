@@ -1,4 +1,4 @@
-/// Exactly one of `routes`, `agencies`.
+/// Exactly one of `routes`, `agencies`; neither or both is a 400 naming `preferences.transit.filters.exclude`.
 public struct TransitFilterSelectInput: Codable, Sendable {
     /// Feed-prefixed route ids (`<feedId>:<routeId>`).
     public let routes: [String]?

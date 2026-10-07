@@ -1,4 +1,4 @@
-/// Exactly one of `earliestDeparture`, `latestArrival`. Both are RFC 3339 date-times with an offset, e.g. `2026-10-07T08:00:00+02:00`.
+/// Exactly one of `earliestDeparture`, `latestArrival`; neither or both is a 400 `dateTime is invalid`. Both are RFC 3339 date-times with seconds and an offset, e.g. `2026-10-07T08:00:00+02:00`.
 public struct PlanDateTimeInput: Codable, Sendable {
     /// Depart at or after this time.
     public let earliestDeparture: String?

@@ -1,31 +1,33 @@
-/// One trip on one service date: its stops and times, realtime merged in. On a date without realtime, the rows carry the schedule alone.
+/// One trip on one service date: its stops and times, realtime merged in. On a date without realtime the rows carry the schedule alone, and on a date the trip does not run they carry its schedule on that date.
 public struct TripTimetable: Codable, Sendable {
     public let gtfsId: String
+    /// `0` or `1`, as the feed gives it; null when it gives none.
+    public let directionId: String
+    /// Null when the feed has none.
+    public let tripHeadsign: String
+    public let bikesAllowed: BikesAllowed
+    public let wheelchairAccessible: WheelchairBoarding
     public let route: TripRoute
-    public let directionId: String?
-    public let tripHeadsign: String?
-    public let bikesAllowed: BikesAllowed?
-    public let wheelchairAccessible: WheelchairBoarding?
-    public let stoptimesForDate: [Stoptime]?
+    public let stoptimesForDate: [Stoptime]
     /// The trip's path; null when the feed has no shapes.
-    public let tripGeometry: TripGeometry?
+    public let tripGeometry: AnyCodable
 
     public init(
         gtfsId: String,
+        directionId: String,
+        tripHeadsign: String,
+        bikesAllowed: BikesAllowed,
+        wheelchairAccessible: WheelchairBoarding,
         route: TripRoute,
-        directionId: String? = nil,
-        tripHeadsign: String? = nil,
-        bikesAllowed: BikesAllowed? = nil,
-        wheelchairAccessible: WheelchairBoarding? = nil,
-        stoptimesForDate: [Stoptime]? = nil,
-        tripGeometry: TripGeometry? = nil
+        stoptimesForDate: [Stoptime],
+        tripGeometry: AnyCodable
     ) {
         self.gtfsId = gtfsId
-        self.route = route
         self.directionId = directionId
         self.tripHeadsign = tripHeadsign
         self.bikesAllowed = bikesAllowed
         self.wheelchairAccessible = wheelchairAccessible
+        self.route = route
         self.stoptimesForDate = stoptimesForDate
         self.tripGeometry = tripGeometry
     }

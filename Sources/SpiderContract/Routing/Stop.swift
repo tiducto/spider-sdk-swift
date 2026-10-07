@@ -1,16 +1,16 @@
 public struct Stop: Codable, Sendable {
     public let gtfsId: String
-    public let wheelchairBoarding: WheelchairBoarding?
+    public let wheelchairBoarding: WheelchairBoarding
     /// Null when the feed has none.
-    public let platformCode: String?
+    public let platformCode: String
     /// Null when the feed has none.
-    public let zoneId: String?
+    public let zoneId: String
 
     public init(
         gtfsId: String,
-        wheelchairBoarding: WheelchairBoarding? = nil,
-        platformCode: String? = nil,
-        zoneId: String? = nil
+        wheelchairBoarding: WheelchairBoarding,
+        platformCode: String,
+        zoneId: String
     ) {
         self.gtfsId = gtfsId
         self.wheelchairBoarding = wheelchairBoarding
