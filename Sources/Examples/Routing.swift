@@ -93,7 +93,7 @@ func laterItineraries(client: SpiderClient) async throws {
         switch next {
         case .success(let laterPage):
             for edge in laterPage.edges {
-                print("\(edge.itinerary.start ?? "?") → \(edge.itinerary.end ?? "?")")
+                print("\(edge.itinerary.start) → \(edge.itinerary.end)")
             }
         case .failure(let error):
             print("next page failed: \(error.message)")
@@ -154,7 +154,7 @@ func streamMoreItineraries(client: SpiderClient) async throws {
         for await event in client.routing.planStreamNext(options, targetResults: 5, maxWindowMinutes: 120, after: cursor) {
             if case .result(let itineraries) = event {
                 for itinerary in itineraries {
-                    print("later: \(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                    print("later: \(itinerary.start) → \(itinerary.end)")
                 }
             }
         }
@@ -183,7 +183,7 @@ func streamEarlierItineraries(client: SpiderClient) async throws {
         for await event in client.routing.planStreamPrevious(options, targetResults: 5, maxWindowMinutes: 120, before: cursor) {
             if case .result(let itineraries) = event {
                 for itinerary in itineraries {
-                    print("earlier: \(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                    print("earlier: \(itinerary.start) → \(itinerary.end)")
                 }
             }
         }
@@ -197,8 +197,8 @@ func tripLookup(client: SpiderClient) async throws {
     let result = try await client.routing.trip("1:12345")
     if case .success(let trip) = result {
         for stop in trip.stops {
-            let arrival = stop.scheduledArrivalEpochMs ?? 0
-            let departure = stop.scheduledDepartureEpochMs ?? 0
+            let arrival = stop.scheduledArrivalEpochMs
+            let departure = stop.scheduledDepartureEpochMs
             print("\(stop.name): arr \(arrival) / dep \(departure)")
         }
     }
@@ -237,7 +237,7 @@ func arriveBy(client: SpiderClient) async throws {
     switch result {
     case .success(let route):
         for edge in route.edges {
-            print("depart \(edge.itinerary.start ?? "?") → arrive \(edge.itinerary.end ?? "?")")
+            print("depart \(edge.itinerary.start) → arrive \(edge.itinerary.end)")
         }
     case .failure(let error):
         print("plan failed: \(error.message)")
@@ -263,7 +263,7 @@ func earlierItineraries(client: SpiderClient) async throws {
         switch previous {
         case .success(let earlierPage):
             for edge in earlierPage.edges {
-                print("\(edge.itinerary.start ?? "?") → \(edge.itinerary.end ?? "?")")
+                print("\(edge.itinerary.start) → \(edge.itinerary.end)")
             }
         case .failure(let error):
             print("previous page failed: \(error.message)")
@@ -348,7 +348,7 @@ func streamForTime(client: SpiderClient) async throws {
         switch event {
         case .result(let itineraries):
             for itinerary in itineraries {
-                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                print("\(itinerary.start) → \(itinerary.end)")
             }
         case .done:
             break
@@ -373,7 +373,7 @@ func streamArriveBy(client: SpiderClient) async throws {
         switch event {
         case .result(let itineraries):
             for itinerary in itineraries {
-                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                print("\(itinerary.start) → \(itinerary.end)")
             }
         case .done:
             break
@@ -397,7 +397,7 @@ func streamWithModes(client: SpiderClient) async throws {
         switch event {
         case .result(let itineraries):
             for itinerary in itineraries {
-                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                print("\(itinerary.start) → \(itinerary.end)")
             }
         case .done:
             break
@@ -421,7 +421,7 @@ func streamVia(client: SpiderClient) async throws {
         switch event {
         case .result(let itineraries):
             for itinerary in itineraries {
-                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                print("\(itinerary.start) → \(itinerary.end)")
             }
         case .done:
             break
@@ -445,7 +445,7 @@ func streamWheelchair(client: SpiderClient) async throws {
         switch event {
         case .result(let itineraries):
             for itinerary in itineraries {
-                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                print("\(itinerary.start) → \(itinerary.end)")
             }
         case .done:
             break
@@ -469,7 +469,7 @@ func streamWithLimits(client: SpiderClient) async throws {
         switch event {
         case .result(let itineraries):
             for itinerary in itineraries {
-                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?")")
+                print("\(itinerary.start) → \(itinerary.end)")
             }
         case .done:
             break
