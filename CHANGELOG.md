@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.3.0
+
+Targets Spider API contract 1.3: strict request bounds and exact response nullability.
+
+### Breaking
+
+- **Delays are one service date per call, over `GET /realtime/v1/delays`.**
+  `delays(byServiceDate:)` and `delays(_:serviceDate:)` are replaced by
+  `delays(serviceDate: String, tripIds: [String]) async throws -> SpiderResult<TripDelays>`, and the
+  `pollDelays` overloads by `pollDelays(serviceDate:tripIds:intervalMs:)`.
+  - Ids are de-duplicated and sorted, so equal requests produce one URL and share the cache.
+  - Fails as `.badRequest` (field `tripIds`) without a request: no ids (`is required`), a blank id
+    (`is invalid`), more than 50 distinct ids (`is out of range`). A malformed date stays `serviceDate is invalid`.
+  - `TripDelays` is flat: `serviceDate`, `delays`, `missing`, `freshness`. `ServiceDateDelays` and `groups` are
+    gone; `delayFor(tripId:serviceDate:)` is now `delayFor(tripId:)`.
+- **Realtime ids are feed-prefixed** (`<feedId>:<id>`), exactly as routing returns them; pass them through.
+- **`SpiderErrorCode.queryRetired` is removed.** HTTP 410 is no longer special; it maps like any other status.
+- **`RoutingErrorCode.noTransitConnectionInSearchWindow` and `.outsideBounds` are removed.**
+- **Nullability follows the contract.** Now non-optional:
+  - `Itinerary.start`, `end`, `waitingTimeSeconds`; `Route.searchDateTime`.
+  - `Leg.mode`, `realtimeState`, `fromName`, `toName`, `distanceMeters`; `Leg.durationSeconds` is an `Int`.
+  - `Departure.realtimeTimeEpochMs` (the scheduled time without realtime), `realtimeState`, `tripGtfsId`,
+    `routeGtfsId`, `mode`, `stopGtfsId`.
+  - `TripDetails.routeGtfsId`, `mode`; `TripStop.lat`, `lon` and its four epoch times.
+  - `Stop.lat`, `lon`.
+  - `LiveVehicle.tripId`, `latitude`, `longitude`; `TripDelay.tripId`; `ServiceAlert.id`.
+- **`FeedFreshness.staleSeconds` is an `Int?`.**
+
 ## 1.2.0
 
 Targets Spider API contract 1.2. Routing moves from persisted GraphQL queries to REST, and every routing, stop
