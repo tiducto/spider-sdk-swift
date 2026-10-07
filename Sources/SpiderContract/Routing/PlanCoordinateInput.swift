@@ -1,8 +1,8 @@
 /// A WGS84 point.
 public struct PlanCoordinateInput: Codable, Sendable {
-    /// Latitude in degrees.
+    /// Latitude in degrees, -90 to 90; rejected, never clamped.
     public let latitude: Double
-    /// Longitude in degrees.
+    /// Longitude in degrees, -180 to 180; rejected, never clamped.
     public let longitude: Double
 
     public init(

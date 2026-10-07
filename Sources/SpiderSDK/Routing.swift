@@ -5,7 +5,7 @@ import SpiderContract
 
 /// One leg of an itinerary (a single vehicle ride or walk).
 public struct Leg: Sendable, Equatable {
-    public let mode: TransitMode?
+    public let mode: TransitMode
     public let startScheduled: String
     public let endScheduled: String
     // Realtime-estimated start/end times (ISO-8601) and the schedule deviation in seconds (positive = late,
@@ -18,13 +18,15 @@ public struct Leg: Sendable, Equatable {
     public let startDelaySeconds: Int?
     public let endDelaySeconds: Int?
     public let isRealtime: Bool
-    public let realtimeState: RealtimeState?
+    public let realtimeState: RealtimeState
+    /// Nil on a walk leg.
     public let serviceDate: String?
     /// The delay in seconds planned onto this leg's arrival at the requested `PlanOptions.reliability`. Nil when
-    /// no reliability was requested or the trip has no delay history.
+    /// no reliability was requested, the trip has live realtime or no delay history, and on a walk leg.
     public let typicalArrivalDelaySeconds: Int?
-    public let fromName: String?
-    public let toName: String?
+    public let fromName: String
+    public let toName: String
+    /// Nil when the place is not a stop, as for an origin or destination coordinate.
     public let fromGtfsId: String?
     public let toGtfsId: String?
     /// The platform (GTFS `platform_code`) the leg boards at / alights at, when the feed has one.
@@ -33,6 +35,7 @@ public struct Leg: Sendable, Equatable {
     /// The fare zone (GTFS `zone_id`) of the boarding / alighting stop, when the feed has one.
     public let fromZoneId: String?
     public let toZoneId: String?
+    /// Nil on a walk leg.
     public let routeGtfsId: String?
     public let routeShortName: String?
     public let routeLongName: String?
@@ -43,8 +46,9 @@ public struct Leg: Sendable, Equatable {
     /// has none.
     public let routeTextColor: String?
     public let headsign: String?
-    public let distanceMeters: Double?
-    public let durationSeconds: Double?
+    public let distanceMeters: Double
+    public let durationSeconds: Int
+    /// Nil on a walk leg.
     public let tripGtfsId: String?
     /// True when the rider stays on the same vehicle from the previous leg, which carries on as another trip (often
     /// under another line number). Not counted in `Itinerary.numberOfTransfers`.
@@ -59,10 +63,10 @@ public struct Leg: Sendable, Equatable {
 
 /// A full origin-to-destination itinerary.
 public struct Itinerary: Sendable, Equatable {
-    public let start: String?
-    public let end: String?
+    public let start: String
+    public let end: String
     public let durationSeconds: Int
-    public let waitingTimeSeconds: Int?
+    public let waitingTimeSeconds: Int
     public let numberOfTransfers: Int
     @available(*, deprecated, message: "Always nil.")
     public let accessibilityScore: Double?
@@ -97,7 +101,7 @@ public struct Route: Sendable, Equatable {
     public let edges: [RouteEdge]
     public let pageInfo: RoutePageInfo
     public let routingErrors: [RoutingError]
-    public let searchDateTime: String?
+    public let searchDateTime: String
     // Carries the originating request so `planNext`/`planPrevious` can page without re-deriving it. Internal.
     let request: PlanRequest
 }
@@ -105,18 +109,19 @@ public struct Route: Sendable, Equatable {
 /// A single departure from a stop.
 public struct Departure: Sendable, Equatable {
     public let scheduledTimeEpochMs: Int64
-    public let realtimeTimeEpochMs: Int64?
+    /// The realtime departure; the scheduled one when the trip has no realtime.
+    public let realtimeTimeEpochMs: Int64
     public let isRealtime: Bool
-    public let realtimeState: RealtimeState?
+    public let realtimeState: RealtimeState
     /// The usual delay in seconds at this stop for this trip: the median for the service date's day type, from the
     /// environment's realtime history. Nil when there is no history.
     public let typicalDelaySeconds: Int?
     public let headsign: String?
-    public let tripGtfsId: String?
+    public let tripGtfsId: String
     /// The GTFS service date (`YYYY-MM-DD`) this departure's trip runs on — the previous day for a night
     /// departure past midnight. Pass it with `tripGtfsId` to `SpiderRouting.trip` and `SpiderRealtime.delays`.
     public let serviceDate: String
-    public let routeGtfsId: String?
+    public let routeGtfsId: String
     public let routeShortName: String?
     public let routeLongName: String?
     /// The route's colour: raw GTFS hex without `#` (e.g. `"FF0000"`), passed through as the feed gives it.
@@ -125,10 +130,10 @@ public struct Departure: Sendable, Equatable {
     /// The colour of text drawn on `routeColor`: raw GTFS hex without `#` (e.g. `"FFFFFF"`). Nil when the feed
     /// has none.
     public let routeTextColor: String?
-    public let mode: TransitMode?
+    public let mode: TransitMode
     /// The stop this departure leaves from (for a station, the platform) and its platform code (GTFS
     /// `platform_code`), when the feed has one.
-    public let stopGtfsId: String?
+    public let stopGtfsId: String
     public let platformCode: String?
     /// Whether a wheelchair user can ride this departure's trip. Nil = no information.
     public let wheelchairAccessible: WheelchairBoarding?
@@ -138,12 +143,13 @@ public struct Departure: Sendable, Equatable {
 public struct TripStop: Sendable, Equatable {
     public let gtfsId: String
     public let name: String
-    public let lat: Double?
-    public let lon: Double?
-    public let scheduledArrivalEpochMs: Int64?
-    public let scheduledDepartureEpochMs: Int64?
-    public let realtimeArrivalEpochMs: Int64?
-    public let realtimeDepartureEpochMs: Int64?
+    public let lat: Double
+    public let lon: Double
+    public let scheduledArrivalEpochMs: Int64
+    public let scheduledDepartureEpochMs: Int64
+    /// The realtime times; the scheduled ones when the trip has no realtime.
+    public let realtimeArrivalEpochMs: Int64
+    public let realtimeDepartureEpochMs: Int64
     public let isRealtime: Bool
     /// The usual delay in seconds at this stop for this trip: the median for the service date's day type, from the
     /// environment's realtime history. Nil when there is no history.
@@ -157,7 +163,7 @@ public struct TripStop: Sendable, Equatable {
 /// A single trip's route, stops, and geometry.
 public struct TripDetails: Sendable, Equatable {
     public let gtfsId: String
-    public let routeGtfsId: String?
+    public let routeGtfsId: String
     public let routeShortName: String?
     public let routeLongName: String?
     /// The route's colour: raw GTFS hex without `#` (e.g. `"FF0000"`), passed through as the feed gives it.
@@ -166,7 +172,7 @@ public struct TripDetails: Sendable, Equatable {
     /// The colour of text drawn on `routeColor`: raw GTFS hex without `#` (e.g. `"FFFFFF"`). Nil when the feed
     /// has none.
     public let routeTextColor: String?
-    public let mode: TransitMode?
+    public let mode: TransitMode
     public let headsign: String?
     public let directionId: String?
     public let bikesAllowed: BikesAllowed?
@@ -621,7 +627,7 @@ private func mapItinerary(_ w: SpiderContract.Itinerary) -> Itinerary {
     Itinerary(
         start: w.start,
         end: w.end,
-        durationSeconds: w.duration ?? 0,
+        durationSeconds: w.duration,
         waitingTimeSeconds: w.waitingTime,
         numberOfTransfers: w.numberOfTransfers,
         accessibilityScore: nil,
@@ -632,15 +638,15 @@ private func mapItinerary(_ w: SpiderContract.Itinerary) -> Itinerary {
 // Shared by the batch plan and the stream chunks; realtime delays come straight off the wire leg.
 private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
     Leg(
-        mode: TransitMode.fromWire(w.mode?.rawValue),
+        mode: TransitMode.fromWire(w.mode.rawValue),
         startScheduled: w.start.scheduledTime,
         endScheduled: w.end.scheduledTime,
         startEstimated: w.start.estimated?.time,
         endEstimated: w.end.estimated?.time,
         startDelaySeconds: parseDelaySeconds(w.start.estimated?.delay),
         endDelaySeconds: parseDelaySeconds(w.end.estimated?.delay),
-        isRealtime: w.realTime ?? false,
-        realtimeState: RealtimeState.fromWire(w.realtimeState?.rawValue),
+        isRealtime: w.realTime,
+        realtimeState: RealtimeState.fromWire(w.realtimeState.rawValue),
         serviceDate: w.serviceDate,
         typicalArrivalDelaySeconds: w.typicalArrivalDelay,
         fromName: w.from.name,
@@ -660,12 +666,12 @@ private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
         distanceMeters: w.distance,
         durationSeconds: w.duration,
         tripGtfsId: w.trip?.gtfsId,
-        interlineWithPreviousLeg: w.interlineWithPreviousLeg ?? false,
-        bikesAllowed: BikesAllowed.fromWire(w.trip?.bikesAllowed?.rawValue),
+        interlineWithPreviousLeg: w.interlineWithPreviousLeg,
+        bikesAllowed: BikesAllowed.fromWire(w.trip?.bikesAllowed.rawValue),
         accessibilityScore: nil,
-        fromWheelchair: WheelchairBoarding.fromWire(w.from.stop?.wheelchairBoarding?.rawValue),
-        toWheelchair: WheelchairBoarding.fromWire(w.to.stop?.wheelchairBoarding?.rawValue),
-        geometry: w.legGeometry?.points.map(decodePolyline) ?? []
+        fromWheelchair: WheelchairBoarding.fromWire(w.from.stop?.wheelchairBoarding.rawValue),
+        toWheelchair: WheelchairBoarding.fromWire(w.to.stop?.wheelchairBoarding.rawValue),
+        geometry: decodePolyline(w.legGeometry.points)
     )
 }
 
@@ -706,43 +712,35 @@ private func mapRoutingError(_ w: SpiderContract.RoutingError) -> RoutingError {
 }
 
 private func mapDepartures(_ stop: DepartureBoard) -> [Departure] {
-    var out: [Departure] = []
-    for st in stop.stoptimesWithoutPatterns ?? [] {
-        guard let serviceDay = st.serviceDay, let scheduledOffset = st.scheduledDeparture else { continue }
-        let route = st.trip?.route
-        out.append(Departure(
-            scheduledTimeEpochMs: Int64(serviceDay + scheduledOffset) * 1000,
-            realtimeTimeEpochMs: st.realtimeDeparture.map { Int64(serviceDay + $0) * 1000 },
-            isRealtime: st.realtime ?? false,
-            realtimeState: RealtimeState.fromWire(st.realtimeState?.rawValue),
+    stop.stoptimesWithoutPatterns.map { st in
+        let route = st.trip.route
+        return Departure(
+            scheduledTimeEpochMs: Int64(st.serviceDay + st.scheduledDeparture) * 1000,
+            realtimeTimeEpochMs: Int64(st.serviceDay + st.realtimeDeparture) * 1000,
+            isRealtime: st.realtime,
+            realtimeState: RealtimeState.fromWire(st.realtimeState.rawValue),
             typicalDelaySeconds: st.typicalDelay,
             headsign: st.headsign,
-            tripGtfsId: st.trip?.gtfsId,
-            serviceDate: isoServiceDate(ofServiceDay: serviceDay),
-            routeGtfsId: route?.gtfsId,
-            routeShortName: route?.shortName,
-            routeLongName: route?.longName,
-            routeColor: route?.color,
-            routeTextColor: route?.textColor,
-            mode: TransitMode.fromWire(route?.mode?.rawValue),
-            stopGtfsId: st.stop?.gtfsId,
-            platformCode: st.stop?.platformCode,
-            wheelchairAccessible: WheelchairBoarding.fromWire(st.trip?.wheelchairAccessible?.rawValue)
-        ))
+            tripGtfsId: st.trip.gtfsId,
+            serviceDate: isoServiceDate(ofServiceDay: st.serviceDay),
+            routeGtfsId: route.gtfsId,
+            routeShortName: route.shortName,
+            routeLongName: route.longName,
+            routeColor: route.color,
+            routeTextColor: route.textColor,
+            mode: TransitMode.fromWire(route.mode.rawValue),
+            stopGtfsId: st.stop.gtfsId,
+            platformCode: st.stop.platformCode,
+            wheelchairAccessible: WheelchairBoarding.fromWire(st.trip.wheelchairAccessible.rawValue)
+        )
     }
-    return out
 }
 
 private func mapTrip(_ w: TripTimetable) -> TripDetails {
-    var stops: [TripStop] = []
-    for st in w.stoptimesForDate ?? [] {
-        guard let s = st.stop else { continue }
-        let day = st.serviceDay
-        func at(_ offset: Int?) -> Int64? {
-            if let offset, let day { return Int64(day + offset) * 1000 }
-            return nil
-        }
-        stops.append(TripStop(
+    let stops = w.stoptimesForDate.map { st in
+        let s = st.stop
+        func at(_ offset: Int) -> Int64 { Int64(st.serviceDay + offset) * 1000 }
+        return TripStop(
             gtfsId: s.gtfsId,
             name: s.name,
             lat: s.lat,
@@ -751,12 +749,12 @@ private func mapTrip(_ w: TripTimetable) -> TripDetails {
             scheduledDepartureEpochMs: at(st.scheduledDeparture),
             realtimeArrivalEpochMs: at(st.realtimeArrival),
             realtimeDepartureEpochMs: at(st.realtimeDeparture),
-            isRealtime: st.realtime ?? false,
+            isRealtime: st.realtime,
             typicalDelaySeconds: st.typicalDelay,
-            wheelchairBoarding: WheelchairBoarding.fromWire(s.wheelchairBoarding?.rawValue),
+            wheelchairBoarding: WheelchairBoarding.fromWire(s.wheelchairBoarding.rawValue),
             platformCode: s.platformCode,
             zoneId: s.zoneId
-        ))
+        )
     }
     return TripDetails(
         gtfsId: w.gtfsId,
@@ -765,14 +763,14 @@ private func mapTrip(_ w: TripTimetable) -> TripDetails {
         routeLongName: w.route.longName,
         routeColor: w.route.color,
         routeTextColor: w.route.textColor,
-        mode: TransitMode.fromWire(w.route.mode?.rawValue),
+        mode: TransitMode.fromWire(w.route.mode.rawValue),
         headsign: w.tripHeadsign,
         directionId: w.directionId,
-        bikesAllowed: BikesAllowed.fromWire(w.bikesAllowed?.rawValue),
-        wheelchairAccessible: WheelchairBoarding.fromWire(w.wheelchairAccessible?.rawValue),
-        serviceDate: w.stoptimesForDate?.lazy.compactMap(\.serviceDay).first.map { isoServiceDate(ofServiceDay: $0) },
+        bikesAllowed: BikesAllowed.fromWire(w.bikesAllowed.rawValue),
+        wheelchairAccessible: WheelchairBoarding.fromWire(w.wheelchairAccessible.rawValue),
+        serviceDate: w.stoptimesForDate.first.map { isoServiceDate(ofServiceDay: $0.serviceDay) },
         stops: stops,
-        geometry: w.tripGeometry?.points.map(decodePolyline) ?? []
+        geometry: w.tripGeometry.map { decodePolyline($0.points) } ?? []
     )
 }
 

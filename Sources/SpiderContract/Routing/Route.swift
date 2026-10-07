@@ -1,6 +1,8 @@
 public struct Route: Codable, Sendable {
     public let gtfsId: String
+    /// Null when the feed has none.
     public let shortName: String?
+    /// Null when the feed has none.
     public let longName: String?
     /// Hex without `#`; null when the feed has none.
     public let color: String?

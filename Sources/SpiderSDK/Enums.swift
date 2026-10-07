@@ -31,9 +31,8 @@ public enum TransitMode: String, Sendable, CaseIterable {
     case walk = "WALK"
     case unknown = "UNKNOWN"
 
-    static func fromWire(_ raw: String?) -> TransitMode? {
-        guard let raw else { return nil }
-        return TransitMode(rawValue: raw) ?? .unknown
+    static func fromWire(_ raw: String) -> TransitMode {
+        TransitMode(rawValue: raw) ?? .unknown
     }
 }
 
@@ -89,9 +88,8 @@ public enum RealtimeState: String, Sendable, CaseIterable {
     case updated = "UPDATED"
     case unknown = "UNKNOWN"
 
-    static func fromWire(_ raw: String?) -> RealtimeState? {
-        guard let raw else { return nil }
-        return RealtimeState(rawValue: raw) ?? .unknown
+    static func fromWire(_ raw: String) -> RealtimeState {
+        RealtimeState(rawValue: raw) ?? .unknown
     }
 }
 
@@ -100,8 +98,6 @@ public enum RoutingErrorCode: String, Sendable, CaseIterable {
     case locationNotFound = "LOCATION_NOT_FOUND"
     case noStopsInRange = "NO_STOPS_IN_RANGE"
     case noTransitConnection = "NO_TRANSIT_CONNECTION"
-    case noTransitConnectionInSearchWindow = "NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW"
-    case outsideBounds = "OUTSIDE_BOUNDS"
     case outsideServicePeriod = "OUTSIDE_SERVICE_PERIOD"
     case walkingBetterThanTransit = "WALKING_BETTER_THAN_TRANSIT"
     case unknown = "UNKNOWN"

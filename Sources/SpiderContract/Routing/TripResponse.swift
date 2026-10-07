@@ -1,4 +1,4 @@
-/// `trip` is null for an unknown id.
+/// `trip` is null for an id that resolves to no trip.
 public struct TripResponse: Codable, Sendable {
     public let trip: TripTimetable?
 

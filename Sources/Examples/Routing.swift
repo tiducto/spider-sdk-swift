@@ -27,11 +27,11 @@ func planTrip(client: SpiderClient) async throws {
     case .success(let route):
         for edge in route.edges {
             let itinerary = edge.itinerary
-            print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?"), \(itinerary.numberOfTransfers) transfers")
+            print("\(itinerary.start) → \(itinerary.end), \(itinerary.numberOfTransfers) transfers")
             for leg in itinerary.legs {
-                let mode = leg.mode?.rawValue ?? "WALK"
+                let mode = leg.mode.rawValue
                 let route = leg.routeShortName ?? "walk"
-                print("  \(mode) \(route): \(leg.fromName ?? "?") → \(leg.toName ?? "?") (\(Int(leg.durationSeconds ?? 0))s)")
+                print("  \(mode) \(route): \(leg.fromName) → \(leg.toName) (\(leg.durationSeconds)s)")
             }
         }
     case .failure(let error):
@@ -60,16 +60,15 @@ func departures(client: SpiderClient) async throws {
     let result = try await client.routing.departures("U123Z1", numberOfDepartures: 5)
     if case .success(let departures) = result {
         for departure in departures {
-            // The scheduled time is always present; the realtime time is filled in once the trip is tracked.
+            // The realtime time equals the scheduled one until the trip is tracked.
             let scheduled = Date(timeIntervalSince1970: Double(departure.scheduledTimeEpochMs) / 1000)
             let route = departure.routeShortName ?? departure.routeLongName ?? "?"
-            let mode = departure.mode?.rawValue ?? "?"
+            let mode = departure.mode.rawValue
             print("\(mode) \(route) → \(departure.headsign ?? "?") at \(scheduled)")
 
-            if departure.isRealtime, let liveMs = departure.realtimeTimeEpochMs {
-                let live = Date(timeIntervalSince1970: Double(liveMs) / 1000)
-                let state = departure.realtimeState?.rawValue ?? "UPDATED"
-                print("  live \(state): now \(live) (trip \(departure.tripGtfsId ?? "?"))")
+            if departure.isRealtime {
+                let live = Date(timeIntervalSince1970: Double(departure.realtimeTimeEpochMs) / 1000)
+                print("  live \(departure.realtimeState.rawValue): now \(live) (trip \(departure.tripGtfsId))")
             }
         }
     }
@@ -119,7 +118,7 @@ func streamItineraries(client: SpiderClient) async throws {
         switch event {
         case .result(let itineraries):
             for itinerary in itineraries {
-                print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?"), \(itinerary.numberOfTransfers) transfers")
+                print("\(itinerary.start) → \(itinerary.end), \(itinerary.numberOfTransfers) transfers")
             }
         case .done(let done):
             // A search that found nothing says why here, as a batch plan's routingErrors do.
@@ -217,7 +216,7 @@ func planWithModes(client: SpiderClient) async throws {
 
     if case .success(let route) = result {
         for edge in route.edges {
-            let modes = edge.itinerary.legs.compactMap { $0.mode?.rawValue }.joined(separator: " → ")
+            let modes = edge.itinerary.legs.map { $0.mode.rawValue }.joined(separator: " → ")
             print("\(edge.itinerary.durationSeconds / 60) min via \(modes)")
         }
     }
@@ -304,10 +303,10 @@ func wheelchairPlan(client: SpiderClient) async throws {
     if case .success(let route) = result {
         for edge in route.edges {
             let itinerary = edge.itinerary
-            print("\(itinerary.start ?? "?") → \(itinerary.end ?? "?"):")
+            print("\(itinerary.start) → \(itinerary.end):")
             for leg in itinerary.legs {
                 let boarding = leg.fromWheelchair == .possible ? "accessible" : "check locally"
-                print("  \(leg.mode?.rawValue ?? "WALK") from \(leg.fromName ?? "?") (\(boarding))")
+                print("  \(leg.mode.rawValue) from \(leg.fromName) (\(boarding))")
             }
         }
     }
@@ -502,8 +501,6 @@ func handleRoutingErrors(client: SpiderClient) async throws {
         case .badRequest:
             // A missing or out-of-range value, or a malformed via, named by `field`.
             print("invalid request on \(error.field ?? "input"): \(error.message)")
-        case .queryRetired:
-            print("this SDK version calls a retired part of the API")
         case .planningLimitReached:
             print("the project has reached the trip-planning limit its plan includes")
         case .agreementInactive:

@@ -21,10 +21,8 @@ func reuseHit(client: SpiderClient) async throws {
 
     let departures = try await client.routing.departures(hit.gtfsId, numberOfDepartures: 5)
 
-    if let lat = hit.lat, let lon = hit.lon {
-        let nearby = Location.coordinate(lat, lon)
-        print("planning from \(hit.name) at \(nearby)")
-    }
+    let nearby = Location.coordinate(hit.lat, hit.lon)
+    print("planning from \(hit.name) at \(nearby)")
     // [END reuseHit]
     _ = departures
 }
@@ -35,7 +33,7 @@ func stopsNearby(client: SpiderClient) async throws {
     let result = try await client.stops.near(49.1951, 16.6068, radiusMeters: 500)
     if case .success(let stops) = result {
         for stop in stops {
-            print("\(stop.name) at \(stop.lat ?? 0),\(stop.lon ?? 0)")
+            print("\(stop.name) at \(stop.lat),\(stop.lon)")
         }
     }
     // [END stopsNearby]

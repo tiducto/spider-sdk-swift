@@ -1,4 +1,4 @@
-/// Exactly one of `passThrough`, `visit`.
+/// Exactly one of `passThrough`, `visit`; neither or both is a 400 `via is invalid`.
 public struct PlanViaLocationInput: Codable, Sendable {
     /// The journey passes the location, on board or by changing vehicles there.
     public let passThrough: PlanPassThroughViaLocationInput?
