@@ -55,7 +55,7 @@ func otherSurfaces(client: SpiderClient, tripId: String) async throws {
 
     let vehicle = try await client.realtime.vehicleForTrip(tripId)
     if case .success(let update) = vehicle, let live = update.vehicle {
-        print("vehicle at \(live.latitude ?? 0),\(live.longitude ?? 0)")
+        print("vehicle at \(live.latitude),\(live.longitude)")
     }
     // [END otherSurfaces]
 }
