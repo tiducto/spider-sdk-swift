@@ -59,6 +59,10 @@ public struct Leg: Sendable, Equatable {
     public let fromWheelchair: WheelchairBoarding?
     public let toWheelchair: WheelchairBoarding?
     public let geometry: [LatLon]
+    /// The boarding and alighting stops' positions in the leg's trip: the `TripStop` of `SpiderRouting.trip` for
+    /// `tripGtfsId` and `serviceDate` with the same `TripStop.stopPosition` is that stop. Nil on a walk leg.
+    public let fromStopPosition: Int?
+    public let toStopPosition: Int?
 }
 
 /// A full origin-to-destination itinerary.
@@ -137,6 +141,8 @@ public struct Departure: Sendable, Equatable {
     public let platformCode: String?
     /// Whether a wheelchair user can ride this departure's trip. Nil = no information.
     public let wheelchairAccessible: WheelchairBoarding?
+    /// The departure's position in its trip, as the trip's `TripStop.stopPosition`.
+    public let stopPosition: Int?
 }
 
 /// One stop on a trip's timetable.
@@ -158,6 +164,13 @@ public struct TripStop: Sendable, Equatable {
     /// The platform (GTFS `platform_code`) and fare zone (GTFS `zone_id`) of the stop, when the feed has them.
     public let platformCode: String?
     public let zoneId: String?
+    /// The stop's position in the trip: increasing along it, not necessarily from 0 or consecutive. A
+    /// `Leg.fromStopPosition`, `Leg.toStopPosition` or `Departure.stopPosition` equal to it names this stop, also on
+    /// a trip that visits one stop twice. Realtime that adds or removes stops can change it.
+    public let stopPosition: Int?
+    /// The index into `TripDetails.geometry` of where the stop sits on the trip's line. Nil when the trip has no
+    /// geometry or the stop has no point on it.
+    public let geometryIndex: Int?
 }
 
 /// A single trip's route, stops, and geometry.
@@ -671,7 +684,9 @@ private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
         accessibilityScore: nil,
         fromWheelchair: WheelchairBoarding.fromWire(w.from.stop?.wheelchairBoarding.rawValue),
         toWheelchair: WheelchairBoarding.fromWire(w.to.stop?.wheelchairBoarding.rawValue),
-        geometry: decodePolyline(w.legGeometry.points)
+        geometry: decodePolyline(w.legGeometry.points),
+        fromStopPosition: w.from.stopPosition,
+        toStopPosition: w.to.stopPosition
     )
 }
 
@@ -731,7 +746,8 @@ private func mapDepartures(_ stop: DepartureBoard) -> [Departure] {
             mode: TransitMode.fromWire(route.mode.rawValue),
             stopGtfsId: st.stop.gtfsId,
             platformCode: st.stop.platformCode,
-            wheelchairAccessible: WheelchairBoarding.fromWire(st.trip.wheelchairAccessible.rawValue)
+            wheelchairAccessible: WheelchairBoarding.fromWire(st.trip.wheelchairAccessible.rawValue),
+            stopPosition: st.stopPosition
         )
     }
 }
@@ -753,7 +769,9 @@ private func mapTrip(_ w: TripTimetable) -> TripDetails {
             typicalDelaySeconds: st.typicalDelay,
             wheelchairBoarding: WheelchairBoarding.fromWire(s.wheelchairBoarding.rawValue),
             platformCode: s.platformCode,
-            zoneId: s.zoneId
+            zoneId: s.zoneId,
+            stopPosition: st.stopPosition,
+            geometryIndex: st.geometryIndex
         )
     }
     return TripDetails(
