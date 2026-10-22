@@ -15,6 +15,8 @@ public struct StopDeparturesStoptime: Codable, Sendable {
     public let typicalDelay: Int?
     /// Null when the feed has none.
     public let headsign: String?
+    /// The position in the trip of this departure, as the trip's `stopPosition`.
+    public let stopPosition: Int?
 
     public init(
         serviceDay: Int,
@@ -25,7 +27,8 @@ public struct StopDeparturesStoptime: Codable, Sendable {
         stop: StopDeparturesStop,
         trip: StopDeparturesTrip,
         typicalDelay: Int? = nil,
-        headsign: String? = nil
+        headsign: String? = nil,
+        stopPosition: Int? = nil
     ) {
         self.serviceDay = serviceDay
         self.scheduledDeparture = scheduledDeparture
@@ -36,5 +39,6 @@ public struct StopDeparturesStoptime: Codable, Sendable {
         self.trip = trip
         self.typicalDelay = typicalDelay
         self.headsign = headsign
+        self.stopPosition = stopPosition
     }
 }
