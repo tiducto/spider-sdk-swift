@@ -288,8 +288,8 @@ final class EnumsAndPolylineTests: XCTestCase {
         XCTAssertEqual(InputField.fromWire("FROM_PLACE"), .unknown)
     }
 
-    func testPolylineDecodesGoogleExample() {
-        let points = decodePolyline("_p~iF~ps|U_ulLnnqC_mqNvxq`@")
+    func testPolylineDecodesGoogleExampleAtPrecision6() {
+        let points = decodePolyline("_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI")
         XCTAssertEqual(points.count, 3)
         XCTAssertEqual(points[0].lat, 38.5, accuracy: 1e-5)
         XCTAssertEqual(points[0].lon, -120.2, accuracy: 1e-5)
@@ -299,7 +299,7 @@ final class EnumsAndPolylineTests: XCTestCase {
 
     func testPolylineTruncationTolerant() {
         XCTAssertEqual(decodePolyline("").count, 0)
-        XCTAssertEqual(decodePolyline("_p~iF").count, 0) // half a point -> nothing complete
+        XCTAssertEqual(decodePolyline("_izlhA").count, 0) // half a point -> nothing complete
     }
 
     func testClientExposesContractVersion() {

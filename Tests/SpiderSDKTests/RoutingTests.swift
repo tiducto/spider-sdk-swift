@@ -14,7 +14,7 @@ final class RoutingTests: XCTestCase {
           "mode":"BUS","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","color":"FF0000","textColor":"FFFFFF"},"headsign":"Downtown",
           "realtimeState":"SCHEDULED","realTime":false,"serviceDate":"2026-08-21","distance":1500.0,"duration":900,
           "trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED"},"typicalArrivalDelay":90,"interlineWithPreviousLeg":true,
-          "legGeometry":{"points":"_p~iF~ps|U_ulLnnqC_mqNvxq`@"}
+          "legGeometry":{"points":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"}
         }]
       }],
       "pageInfo":{"hasNextPage":true,"hasPreviousPage":true,"startCursor":"c0","endCursor":"c1","searchWindowUsed":"PT60M"},
@@ -513,7 +513,7 @@ final class RoutingTests: XCTestCase {
         {"trip":{"gtfsId":"T1","directionId":"0","tripHeadsign":"Airport","bikesAllowed":"NOT_ALLOWED","wheelchairAccessible":"NOT_POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"FF0000","textColor":"FFFFFF"},"stoptimesForDate":[
           {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"realtimeState":"UPDATED","typicalDelay":30,"stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE","platformCode":"1","zoneId":"P"}},
           {"serviceDay":1700000000,"scheduledArrival":36600,"scheduledDeparture":36600,"realtimeArrival":36600,"realtimeDeparture":36600,"realtime":false,"realtimeState":"SCHEDULED","typicalDelay":null,"stop":{"gtfsId":"S2","name":"B","lat":49.2,"lon":16.62,"wheelchairBoarding":"NO_INFORMATION","platformCode":null,"zoneId":null}}
-        ],"tripGeometry":{"points":"_p~iF~ps|U","length":2}}}
+        ],"tripGeometry":{"points":"_izlhA~rlgdF","length":2}}}
         """
         let (client, mock) = makeClient { _ in json(body) }
         let result = try await client.routing.trip("T1", serviceDate: "2026-08-21")

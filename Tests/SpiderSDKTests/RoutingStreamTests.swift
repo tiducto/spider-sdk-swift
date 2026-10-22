@@ -24,7 +24,7 @@ final class RoutingStreamTests: XCTestCase {
                   "to":   { "name": "Dest",   "stop": { "gtfsId": "1:B", "wheelchairBoarding": "NO_INFORMATION" } },
                   "route": { "gtfsId": "1:R12", "shortName": "12" }, "trip": { "gtfsId": "1:T", "bikesAllowed": "ALLOWED" },
                   "headsign": "Dest", "distance": 9000.0, "duration": 1800,
-                  "typicalArrivalDelay": 150, "interlineWithPreviousLeg": true, "legGeometry": { "points": "_p~iF~ps|U" }
+                  "typicalArrivalDelay": 150, "interlineWithPreviousLeg": true, "legGeometry": { "points": "_izlhA~rlgdF" }
                 }
               ]
             }
