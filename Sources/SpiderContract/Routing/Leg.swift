@@ -3,6 +3,7 @@ public struct Leg: Codable, Sendable {
     public let mode: Mode
     public let start: LegTime
     public let end: LegTime
+    /// The realtime state of the leg's trip; `SCHEDULED` on a walk leg.
     public let realtimeState: RealtimeState
     /// True when the leg's times include realtime.
     public let realTime: Bool

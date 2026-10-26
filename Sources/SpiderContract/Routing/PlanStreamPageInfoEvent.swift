@@ -4,7 +4,7 @@ public struct PlanStreamPageInfoEvent: Codable, Sendable {
     public let hasNextPage: Bool
     /// True exactly when `startCursor` is present.
     public let hasPreviousPage: Bool
-    /// Why the plan was declined; empty when it was not.
+    /// Why the plan was declined or kept no transit itinerary in the window; empty otherwise.
     public let routingErrors: [RoutingError]
     /// Send as `before` for earlier itineraries; null when there is none, as for a declined, direct-only or unroutable plan.
     public let startCursor: String?
