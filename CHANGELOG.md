@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.5.0
+
+Targets Spider API contract 1.5.
+
+### Added
+
+- **`RoutingErrorCode.noDirectModeConnection`, `.noTransitConnectionInSearchWindow` and `.outsideBounds`**: the
+  enum now has all eight codes the router reports. A coordinate outside the area the router covers is
+  `.outsideBounds` on `.from` or `.to`, and one with no street near enough to link to is `.locationNotFound`.
+  A search that ran but kept no transit itinerary in the window says why in `Route.routingErrors` (and a stream's
+  `done.routingErrors`): `.noTransitConnectionInSearchWindow`, or `.walkingBetterThanTransit` when walking beat
+  every transit itinerary found. Each case documents its meaning and `inputField`.
+
+### Changed
+
+- **`visit` and `passThrough` via locations may be mixed in one plan or stream**, in the order given. Contract 1.4
+  answered a mix with a 400 `via is invalid`.
+- Doc comments follow contract 1.5: what a pass-through counts as, coordinates rounded to 7 decimals,
+  `wheelchairAccessible`'s rules, and `Leg.realtimeState` being `.scheduled` on a walk leg.
+
 ## 1.4.0
 
 Targets Spider API contract 1.4.

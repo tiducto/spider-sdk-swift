@@ -18,6 +18,7 @@ public struct Leg: Sendable, Equatable {
     public let startDelaySeconds: Int?
     public let endDelaySeconds: Int?
     public let isRealtime: Bool
+    /// The realtime state of the leg's trip; `.scheduled` on a walk leg.
     public let realtimeState: RealtimeState
     /// Nil on a walk leg.
     public let serviceDate: String?
@@ -104,6 +105,7 @@ public struct RoutingError: Sendable, Equatable {
 public struct Route: Sendable, Equatable {
     public let edges: [RouteEdge]
     public let pageInfo: RoutePageInfo
+    /// Why the plan was declined or kept no transit itinerary in the window; empty otherwise.
     public let routingErrors: [RoutingError]
     public let searchDateTime: String
     // Carries the originating request so `planNext`/`planPrevious` can page without re-deriving it. Internal.
@@ -201,7 +203,11 @@ public struct TripDetails: Sendable, Equatable {
 /// Options for a trip-plan search. `departAt`/`arriveBy` are mutually exclusive (arriveBy wins if both set;
 /// neither = depart now). `allowedTransitModes` empty = all modes. `searchWindowMinutes` defaults to 60 and may go
 /// up to the environment's search-window limit. `maxTransfers` nil = the environment's limit. `reliability` nil =
-/// plan on the timetable alone.
+/// plan on the timetable alone. The journey must visit or pass through the `via`
+/// locations in the order given; `visit` and `passThrough` entries may be mixed.
+/// `wheelchairAccessible` rides only trips the feed marks wheelchair accessible, boards and alights only at stops it
+/// marks accessible (no information counts as not accessible), and walks strongly avoiding steps and ways mapped as
+/// not wheelchair accessible; the feed's accessibility data limits what this guarantees.
 public struct PlanOptions: Sendable {
     public let origin: Location
     public let destination: Location

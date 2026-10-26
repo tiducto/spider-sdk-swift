@@ -61,8 +61,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.path, "/routing/v1/plan")
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.4")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.4.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.5")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.5.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
         let body = req.bodyJSON
         XCTAssertNil(body["id"])
@@ -230,6 +230,48 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual((via[0]["passThrough"] as! [String: Any])["stopLocationIds"] as? [String], ten)
         XCTAssertEqual(via[1]["visit"] as! NSDictionary, ["stopLocationIds": ["1:W"], "minimumWaitTime": "PT3600S"] as NSDictionary)
         XCTAssertEqual(via[2]["visit"] as! NSDictionary, ["stopLocationIds": ["1:X"]] as NSDictionary)
+    }
+
+    func testPlanSendsMixedViaKindsInOrder() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let result = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"),
+            via: [.passThrough("1:P1"), .visit(.stop("1:V"), minimumWaitSeconds: 120), .passThrough("1:P2", "1:P3")]
+        ))
+        XCTAssertTrue(result.isSuccess)
+        let expected: [[String: Any]] = [
+            ["passThrough": ["stopLocationIds": ["1:P1"]]],
+            ["visit": ["stopLocationIds": ["1:V"], "minimumWaitTime": "PT120S"]],
+            ["passThrough": ["stopLocationIds": ["1:P2", "1:P3"]]],
+        ]
+        XCTAssertEqual(mock.requests[0].bodyJSON["via"] as! NSArray, expected as NSArray)
+    }
+
+    func testPlanDecodesEveryRoutingErrorCode() async throws {
+        let body = """
+        {"itineraries":[],"pageInfo":{"startCursor":null,"endCursor":null,"hasNextPage":false,"hasPreviousPage":false,"searchWindowUsed":null},
+         "routingErrors":[
+           {"code":"LOCATION_NOT_FOUND","description":"Origin is unknown","inputField":"FROM"},
+           {"code":"NO_DIRECT_MODE_CONNECTION","description":"No walk","inputField":null},
+           {"code":"NO_STOPS_IN_RANGE","description":"No stops","inputField":"TO"},
+           {"code":"NO_TRANSIT_CONNECTION","description":"Not connected","inputField":null},
+           {"code":"NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW","description":"Nothing in the window","inputField":"DATE_TIME"},
+           {"code":"OUTSIDE_BOUNDS","description":"Outside the area","inputField":"TO"},
+           {"code":"OUTSIDE_SERVICE_PERIOD","description":"Outside the feed","inputField":"DATE_TIME"},
+           {"code":"WALKING_BETTER_THAN_TRANSIT","description":"Walk","inputField":null}
+         ],
+         "searchDateTime":"2026-10-07T08:00:00+02:00"}
+        """
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let route) = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))) else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(route.routingErrors.map(\.code), [
+            .locationNotFound, .noDirectModeConnection, .noStopsInRange, .noTransitConnection,
+            .noTransitConnectionInSearchWindow, .outsideBounds, .outsideServicePeriod, .walkingBetterThanTransit,
+        ])
+        XCTAssertEqual(route.routingErrors.map(\.inputField), [.from, nil, .to, nil, .dateTime, .to, .dateTime, nil])
+        XCTAssertEqual(RoutingErrorCode.allCases.count, 9)
     }
 
     // Wire values this SDK doesn't know decode to `.unknown`; an unknown via stop is a VIA routing error.
