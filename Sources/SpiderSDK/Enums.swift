@@ -93,12 +93,26 @@ public enum RealtimeState: String, Sendable, CaseIterable {
     }
 }
 
-/// Why routing failed. Unrecognized values map to `.unknown`.
+/// Why the router declined the plan or found no transit route. Unrecognized values map to `.unknown`.
 public enum RoutingErrorCode: String, Sendable, CaseIterable {
+    /// A stop id resolves to no stop or station (`inputField` `.from`, `.to` or `.via`), or a coordinate has no
+    /// street near enough to link to (`.from` or `.to`).
     case locationNotFound = "LOCATION_NOT_FOUND"
+    /// A direct-only plan found no walk (`inputField` nil).
+    case noDirectModeConnection = "NO_DIRECT_MODE_CONNECTION"
+    /// No stop is in walking range of the origin (`.from`) or the destination (`.to`).
     case noStopsInRange = "NO_STOPS_IN_RANGE"
+    /// The origin and the destination lie in parts of the transit network that no trip connects (`inputField` nil).
     case noTransitConnection = "NO_TRANSIT_CONNECTION"
+    /// The transit search ran but found no transit itinerary leaving inside the search window (`.dateTime`).
+    case noTransitConnectionInSearchWindow = "NO_TRANSIT_CONNECTION_IN_SEARCH_WINDOW"
+    /// A coordinate lies outside the area the router covers (`.from` or `.to`).
+    case outsideBounds = "OUTSIDE_BOUNDS"
+    /// The date is outside what the feed covers (`.dateTime`).
     case outsideServicePeriod = "OUTSIDE_SERVICE_PERIOD"
+    /// The origin and destination are the same stop, a station and one of its own platforms, identical
+    /// coordinates or coordinates that snap to the same street point, or every transit itinerary the search
+    /// found was dropped as worse than walking (`inputField` nil).
     case walkingBetterThanTransit = "WALKING_BETTER_THAN_TRANSIT"
     case unknown = "UNKNOWN"
 

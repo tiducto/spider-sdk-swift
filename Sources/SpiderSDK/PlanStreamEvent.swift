@@ -11,9 +11,9 @@ public enum PlanStreamEvent {
         /// `planStreamNext(..., after:)`, or `startCursor` (when `hasPreviousPage`) and continue with
         /// `planStreamPrevious(..., before:)`.
         public let pageInfo: RoutePageInfo
-        /// Why the sweep found nothing, or found less than it could (e.g. `.outsideServicePeriod`,
-        /// `.locationNotFound`) — the same routing errors a batch `plan` returns on `Route.routingErrors`.
-        /// Empty when there are none.
+        /// Why the plan was declined or kept no transit itinerary in the window (e.g. `.outsideServicePeriod`,
+        /// `.locationNotFound`, `.noTransitConnectionInSearchWindow`) — the same routing errors a batch `plan`
+        /// returns on `Route.routingErrors`. Empty otherwise.
         public let routingErrors: [RoutingError]
     }
 

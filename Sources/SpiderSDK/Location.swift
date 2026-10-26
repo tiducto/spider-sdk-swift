@@ -5,7 +5,7 @@ public enum Location: Sendable, Equatable {
     case coordinate(latitude: Double, longitude: Double)
     case stop(id: String)
 
-    /// A geographic coordinate.
+    /// A geographic coordinate. A trip plan rounds it to 7 decimals (about 1 cm), ties away from zero.
     public static func coordinate(_ latitude: Double, _ longitude: Double) -> Location {
         .coordinate(latitude: latitude, longitude: longitude)
     }
@@ -21,7 +21,9 @@ public enum ViaLocation: Sendable, Equatable {
     case passThrough(stopIds: [String])
     case visit(location: Location, minimumWaitSeconds: Int)
 
-    /// Require the route to pass through any of the given stops (no dwell), 1 to 10 of them.
+    /// Require the route to pass through any of the given stops (no dwell), 1 to 10 of them: on board, alighting
+    /// there, or starting there. A stop where the vehicle does not let passengers off is not passed on board, and
+    /// walking there to board is not a pass.
     public static func passThrough(_ stopIds: String...) -> ViaLocation {
         .passThrough(stopIds: stopIds)
     }
