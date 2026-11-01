@@ -9,7 +9,7 @@ final class PlanLimitTests: XCTestCase {
     private let agreementBody = #"{"error":"agreement_inactive","message":"agreement is not active"}"#
 
     private static let surfaces = [
-        "plan", "departures", "trip", "stops.search", "stops.byId",
+        "plan", "departures", "trip", "estimatedDelays", "stops.search", "stops.byId",
         "realtime.vehicles", "realtime.vehicleForTrip", "realtime.delays", "realtime.alerts",
     ]
 
@@ -23,7 +23,8 @@ final class PlanLimitTests: XCTestCase {
         }
         record("plan", try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))))
         record("departures", try await client.routing.departures("S"))
-        record("trip", try await client.routing.trip("T"))
+        record("trip", try await client.routing.trip("T", serviceDate: "2026-01-01"))
+        record("estimatedDelays", try await client.routing.estimatedDelays("T", serviceDate: "2026-01-01", stopPosition: 0))
         record("stops.search", try await client.stops.search(StopFilter(name: "Main")))
         do {
             _ = try await client.stops.byId("S")
@@ -31,8 +32,8 @@ final class PlanLimitTests: XCTestCase {
         } catch let error as SpiderError {
             errors.append(("stops.byId", error))
         }
-        record("realtime.vehicles", try await client.realtime.vehicles(["1:T1"]))
-        record("realtime.vehicleForTrip", try await client.realtime.vehicleForTrip("1:T1"))
+        record("realtime.vehicles", try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T1"]))
+        record("realtime.vehicleForTrip", try await client.realtime.vehicleForTrip("1:T1", serviceDate: "2026-01-01"))
         record("realtime.delays", try await client.realtime.delays(serviceDate: "2026-01-01", tripIds: ["1:T1"]))
         record("realtime.alerts", try await client.realtime.alerts())
         XCTAssertEqual(errors.map(\.0), Self.surfaces)

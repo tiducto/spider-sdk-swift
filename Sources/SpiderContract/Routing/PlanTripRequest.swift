@@ -19,7 +19,7 @@ public struct PlanTripRequest: Codable, Sendable {
     public let before: String?
     /// `pageInfo.endCursor` of a page, to fetch the page after it. Never with `before`. A `startCursor` here is a 400 `after is invalid`.
     public let after: String?
-    /// Delay-aware planning level; omitted or null plans on the timetable alone.
+    /// Delay-aware planning level: each leg's arrival is planned with its `typicalArrivalDelay` at this level. Boarding keeps the scheduled departure, and a trip with live realtime uses its realtime times. Omitted or null plans on the timetable alone.
     public let reliability: Reliability?
 
     public init(

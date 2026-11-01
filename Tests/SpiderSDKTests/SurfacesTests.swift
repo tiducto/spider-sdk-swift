@@ -103,25 +103,26 @@ final class StopsTests: XCTestCase {
 final class RealtimeTests: XCTestCase {
     func testVehiclesMapsAndConvertsSecondsToMillis() async throws {
         let body = """
-        {"vehicles":[{"tripId":"1:T1","vehicleId":"1:V7","latitude":49.1,"longitude":16.6,"bearing":90.0,"speed":10.0,"occupancyStatus":"FEW_SEATS_AVAILABLE","timestamp":1700000000}],"missing":["1:T9"],"feedTimestamp":1700000000,"staleSeconds":3}
+        {"vehicles":[{"tripId":"1:T1","serviceDate":"2026-01-01","vehicleId":"1:V7","latitude":49.1,"longitude":16.6,"bearing":90.0,"speed":10.0,"occupancyStatus":"FEW_SEATS_AVAILABLE","timestamp":1700000000}],"missing":["1:T9"],"feedTimestamp":1700000000,"staleSeconds":3}
         """
         let (client, mock) = makeClient { _ in json(body) }
-        let result = try await client.realtime.vehicles(["1:T1", "1:T9"])
+        let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T1", "1:T9"])
         guard case .success(let positions) = result else { return XCTFail("expected success") }
         XCTAssertEqual(positions.vehicles.count, 1)
         XCTAssertEqual(positions.vehicles[0].tripId, "1:T1")
+        XCTAssertEqual(positions.vehicles[0].serviceDate, "2026-01-01")
         XCTAssertEqual(positions.vehicles[0].vehicleId, "1:V7")
         XCTAssertEqual(positions.vehicles[0].timestampEpochMs, 1_700_000_000 * 1000)
         XCTAssertEqual(positions.vehicles[0].occupancy, .fewSeatsAvailable)
         XCTAssertEqual(positions.missing, ["1:T9"])
         XCTAssertEqual(positions.freshness.feedTimestampEpochMs, 1_700_000_000 * 1000)
         XCTAssertEqual(positions.freshness.staleSeconds, 3)
-        XCTAssertEqual(mock.requests[0].url?.query, "tripIds=1:T1,1:T9")
+        XCTAssertEqual(mock.requests[0].url?.query, "serviceDate=2026-01-01&tripIds=1:T1,1:T9")
     }
 
     func testVehiclesWithNoTripIdsIsEmptySuccessWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json(#"{"vehicles":[],"missing":[]}"#) }
-        let result = try await client.realtime.vehicles([])
+        let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: [])
         guard case .success(let positions) = result else { return XCTFail("expected success") }
         XCTAssertEqual(positions.vehicles, [])
         XCTAssertEqual(positions.missing, [])
@@ -131,13 +132,13 @@ final class RealtimeTests: XCTestCase {
     // At most 50 trip ids per request is a fixed platform limit, checked before sending.
     func testVehiclesRejectsMoreThanFiftyTripIdsWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json(#"{"vehicles":[],"missing":[]}"#) }
-        let result = try await client.realtime.vehicles((0..<51).map { "1:T\($0)" })
+        let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: (0..<51).map { "1:T\($0)" })
         guard case .failure(let error) = result else { return XCTFail("expected failure") }
         XCTAssertEqual(error.code, .badRequest)
         XCTAssertEqual(error.field, "tripIds")
         XCTAssertEqual(error.message, "tripIds is out of range")
         XCTAssertTrue(mock.requests.isEmpty)
-        let fifty = try await client.realtime.vehicles((0..<50).map { "1:T\($0)" })
+        let fifty = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: (0..<50).map { "1:T\($0)" })
         XCTAssertTrue(fifty.isSuccess)
         XCTAssertEqual(mock.requests.count, 1)
     }
@@ -145,14 +146,14 @@ final class RealtimeTests: XCTestCase {
     // The realtime service answers an invalid input with a 400 naming the field.
     func testRealtime400IsBadRequestWithField() async throws {
         let (client, _) = makeClient { _ in json(#"{"code":"bad_request","message":"tripIds is out of range","field":"tripIds"}"#, status: 400) }
-        let result = try await client.realtime.vehicles(["1:T1"])
+        let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T1"])
         guard case .failure(let error) = result else { return XCTFail("expected failure") }
         XCTAssertEqual(error.code, .badRequest)
         XCTAssertEqual(error.field, "tripIds")
         XCTAssertTrue(error.message.contains("tripIds is out of range"))
 
         let (tripClient, _) = makeClient { _ in json("tripId is invalid\n", status: 400) }
-        guard case .failure(let byTrip) = try await tripClient.realtime.vehicleForTrip("1:T1") else { return XCTFail("expected failure") }
+        guard case .failure(let byTrip) = try await tripClient.realtime.vehicleForTrip("1:T1", serviceDate: "2026-01-01") else { return XCTFail("expected failure") }
         XCTAssertEqual(byTrip.code, .badRequest)
         XCTAssertEqual(byTrip.field, "tripId")
 
@@ -167,15 +168,15 @@ final class RealtimeTests: XCTestCase {
     // A field is named only on a bad request, never on another status whose message happens to match.
     func testNon400ErrorCarriesNoField() async throws {
         let (client, _) = makeClient { _ in json("tripIds is out of range", status: 500) }
-        guard case .failure(let error) = try await client.realtime.vehicles(["1:T1"]) else { return XCTFail("expected failure") }
+        guard case .failure(let error) = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T1"]) else { return XCTFail("expected failure") }
         XCTAssertEqual(error.code, .server)
         XCTAssertNil(error.field)
     }
 
     func testRealtimeCallsUseTheirV1Paths() async throws {
         let (client, mock) = makeClient { _ in json("{}") }
-        _ = try await client.realtime.vehicles(["1:T1"])
-        _ = try await client.realtime.vehicleForTrip("1:T1")
+        _ = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T1"])
+        _ = try await client.realtime.vehicleForTrip("1:T1", serviceDate: "2026-01-01")
         _ = try await client.realtime.delays(serviceDate: "2026-01-01", tripIds: ["1:T1"])
         _ = try await client.realtime.alerts()
         XCTAssertEqual(mock.requests.map { "\($0.httpMethod ?? "") \($0.path)" }, [
@@ -186,9 +187,41 @@ final class RealtimeTests: XCTestCase {
         ])
     }
 
+    func testVehicleForTripSendsServiceDateAndDecodesIt() async throws {
+        let body = #"{"vehicle":{"tripId":"1:T/1","serviceDate":"2026-01-01","latitude":49.1,"longitude":16.6},"feedTimestamp":1700000000}"#
+        let (client, mock) = makeClient { _ in json(body) }
+        let result = try await client.realtime.vehicleForTrip("1:T/1", serviceDate: "2026-01-01")
+        guard case .success(let update) = result, let vehicle = update.vehicle else { return XCTFail("expected a vehicle") }
+        XCTAssertEqual(vehicle.serviceDate, "2026-01-01")
+        XCTAssertEqual(mock.requests[0].url?.absoluteString, "https://env.api.example.com/realtime/v1/vehicles/by-trip/1:T%2F1?serviceDate=2026-01-01")
+    }
+
+    // A vehicle without the run's service date is malformed.
+    func testVehicleWithoutServiceDateIsDecodingFailure() async throws {
+        let (client, _) = makeClient { _ in json(#"{"vehicles":[{"tripId":"1:T1","latitude":49.1,"longitude":16.6}],"missing":[]}"#) }
+        let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T1"])
+        XCTAssertEqual(result.error?.code, .decoding)
+    }
+
+    func testVehiclesRejectMalformedServiceDateWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        for bad in ["", "20260101", "2026-02-30"] {
+            for result in [
+                try await client.realtime.vehicles(serviceDate: bad, tripIds: ["1:T1"]).error,
+                try await client.realtime.vehicles(serviceDate: bad, tripIds: []).error,
+                try await client.realtime.vehicleForTrip("1:T1", serviceDate: bad).error,
+            ] {
+                XCTAssertEqual(result?.code, .badRequest)
+                XCTAssertEqual(result?.field, "serviceDate")
+                XCTAssertEqual(result?.message, "serviceDate is invalid")
+            }
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
+
     func testVehicleForTrip404IsSoftNull() async throws {
         let (client, _) = makeClient { _ in json("{}", status: 404) }
-        let result = try await client.realtime.vehicleForTrip("1:T1")
+        let result = try await client.realtime.vehicleForTrip("1:T1", serviceDate: "2026-01-01")
         guard case .success(let update) = result else { return XCTFail("expected success") }
         XCTAssertNil(update.vehicle)
     }
@@ -304,6 +337,6 @@ final class EnumsAndPolylineTests: XCTestCase {
 
     func testClientExposesContractVersion() {
         let (client, _) = makeClient { _ in json("{}") }
-        XCTAssertEqual(client.contractVersion, "1.5")
+        XCTAssertEqual(client.contractVersion, "1.6")
     }
 }

@@ -6,14 +6,6 @@ private let utcCalendar: Calendar = {
     return calendar
 }()
 
-// The GTFS service date (`YYYY-MM-DD`) of a wire `serviceDay` (epoch seconds of the service day's noon-minus-12h
-// reference). Adding 12h lands on the service day's own noon, whose UTC calendar date is the service date for
-// any agency zone within ±12h — including a night trip whose times run past 24:00.
-func isoServiceDate(ofServiceDay serviceDay: Int) -> String {
-    let parts = utcCalendar.dateComponents([.year, .month, .day], from: Date(timeIntervalSince1970: TimeInterval(serviceDay + 43_200)))
-    return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
-}
-
 // True for an ISO `YYYY-MM-DD` naming a real calendar day.
 func isServiceDate(_ value: String) -> Bool {
     let chars = Array(value.utf8)

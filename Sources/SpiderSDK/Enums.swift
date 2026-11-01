@@ -136,10 +136,14 @@ public enum InputField: String, Sendable, CaseIterable {
     }
 }
 
-/// How much delay a trip plan allows for: each leg's arrival is planned with the trip's typical delay at that stop,
-/// the median at `.standard`, the 70th percentile at `.safe`, the 90th at `.verySafe`. Sent, never decoded.
+/// A delay level: the level a trip plan plans each leg's arrival with (`PlanOptions.reliability`), and the level
+/// `typicalDelaySeconds` is given at (`departures`, `trip`). Each is a percentile of the trip's recorded delay at a
+/// stop on the service date's day type. Nil wherever it is taken means the timetable. Sent, never decoded.
 public enum Reliability: String, Sendable, CaseIterable {
+    /// p50 of recorded delay.
     case standard = "STANDARD"
+    /// p70 of recorded delay.
     case safe = "SAFE"
+    /// p90 of recorded delay.
     case verySafe = "VERY_SAFE"
 }

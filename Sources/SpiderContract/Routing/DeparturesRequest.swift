@@ -8,16 +8,20 @@ public struct DeparturesRequest: Codable, Sendable {
     public let timeRange: Int
     /// Unix seconds the board starts at, from 0 to 4102444799 (2099-12-31T23:59:59Z). Absent or 0 means now.
     public let startTime: Int?
+    /// The level `typicalDelay` is given at; the times do not depend on it. Omitted or null, `typicalDelay` is null. A value outside `Reliability` is a 400 `reliability is invalid`.
+    public let reliability: Reliability?
 
     public init(
         id: String,
         numberOfDepartures: Int,
         timeRange: Int,
-        startTime: Int? = nil
+        startTime: Int? = nil,
+        reliability: Reliability? = nil
     ) {
         self.id = id
         self.numberOfDepartures = numberOfDepartures
         self.timeRange = timeRange
         self.startTime = startTime
+        self.reliability = reliability
     }
 }

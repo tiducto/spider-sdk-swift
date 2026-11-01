@@ -61,8 +61,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.path, "/routing/v1/plan")
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.5")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.5.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.6")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.6.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
         let body = req.bodyJSON
         XCTAssertNil(body["id"])
@@ -458,8 +458,8 @@ final class RoutingTests: XCTestCase {
     func testDeparturesMapsEveryRowWithServiceDate() async throws {
         let body = """
         {"stop":{"gtfsId":"S","name":"Main Square","wheelchairBoarding":"POSSIBLE","stoptimesWithoutPatterns":[
-          {"serviceDay":1700000000,"scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","typicalDelay":45,"stopPosition":7,"headsign":"Airport","stop":{"gtfsId":"S:P2","platformCode":"2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"00A0E0","textColor":"000000"}}},
-          {"serviceDay":1700000000,"scheduledDeparture":36300,"realtimeDeparture":36300,"realtime":false,"realtimeState":"SCHEDULED","typicalDelay":null,"headsign":"main square","stop":{"gtfsId":"S:P1","platformCode":null},"trip":{"gtfsId":"T2","bikesAllowed":"NO_INFORMATION","wheelchairAccessible":"NO_INFORMATION","route":{"gtfsId":"1:R5","shortName":"5","longName":null,"mode":"TRAM","color":null,"textColor":null}}}
+          {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","typicalDelay":45,"stopPosition":7,"headsign":"Airport","stop":{"gtfsId":"S:P2","platformCode":"2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"00A0E0","textColor":"000000"}}},
+          {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36300,"realtimeDeparture":36300,"realtime":false,"realtimeState":"SCHEDULED","typicalDelay":null,"headsign":"main square","stop":{"gtfsId":"S:P1","platformCode":null},"trip":{"gtfsId":"T2","bikesAllowed":"NO_INFORMATION","wheelchairAccessible":"NO_INFORMATION","route":{"gtfsId":"1:R5","shortName":"5","longName":null,"mode":"TRAM","color":null,"textColor":null}}}
         ]}}
         """
         let (client, mock) = makeClient { _ in json(body) }
@@ -467,7 +467,8 @@ final class RoutingTests: XCTestCase {
         guard case .success(let departures) = result else { return XCTFail("expected success") }
         XCTAssertEqual(departures.map(\.tripGtfsId), ["T1", "T2"])
         let d = departures[0]
-        XCTAssertEqual(d.serviceDate, "2023-11-15")
+        // Read from the wire as given, not derived from serviceDay.
+        XCTAssertEqual(d.serviceDate, "2023-11-14")
         XCTAssertEqual(d.scheduledTimeEpochMs, (1_700_000_000 + 36_000) * 1000)
         XCTAssertEqual(d.realtimeTimeEpochMs, (1_700_000_000 + 36_060) * 1000)
         XCTAssertEqual(d.mode, .bus)
@@ -494,6 +495,13 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(bare.stopPosition)
         XCTAssertEqual(mock.requests[0].path, "/routing/v1/departures")
         XCTAssertEqual(mock.requests[0].bodyJSON["numberOfDepartures"] as? Int, 10)
+        XCTAssertNil(mock.requests[0].bodyJSON["reliability"])
+    }
+
+    func testDeparturesSendsReliabilityWhenSet() async throws {
+        let (client, mock) = makeClient { _ in json(#"{"stop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[]}}"#) }
+        _ = try await client.routing.departures("S", reliability: .verySafe)
+        XCTAssertEqual(mock.requests[0].bodyJSON["reliability"] as? String, "VERY_SAFE")
     }
 
     // Both limited inputs are required on the wire, so the SDK always sends them: 30 departures within 24 h.
@@ -529,22 +537,9 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(mock.requests.isEmpty)
     }
 
-    // A night departure past midnight belongs to the previous service date: serviceDay is 2026-09-28's
-    // noon-minus-12h in Europe/Prague (22:00Z on the 27th), and 24:40 is 00:40 on the 29th local time.
-    func testNightDepartureKeepsItsServiceDate() async throws {
-        let body = """
-        {"stop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[
-          {"serviceDay":1790546400,"scheduledDeparture":88800,"realtimeDeparture":88800,"realtime":false,"realtimeState":"SCHEDULED","headsign":"Depot","stop":{"gtfsId":"S"},"trip":{"gtfsId":"N1","bikesAllowed":"NO_INFORMATION","wheelchairAccessible":"NO_INFORMATION","route":{"gtfsId":"1:N90","shortName":"N90","mode":"BUS"}}}
-        ]}}
-        """
-        let (client, _) = makeClient { _ in json(body) }
-        guard case .success(let departures) = try await client.routing.departures("S") else { return XCTFail("expected success") }
-        XCTAssertEqual(departures[0].serviceDate, "2026-09-28")
-    }
-
     func testTripRejectsMalformedServiceDateWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json("{}") }
-        for bad in ["20260921", "2026-09-31", "21-09-2026", "2026-09-21T00:00:00Z"] {
+        for bad in ["", "20260921", "2026-09-31", "21-09-2026", "2026-09-21T00:00:00Z"] {
             let result = try await client.routing.trip("T1", serviceDate: bad)
             guard case .failure(let error) = result else { return XCTFail("expected failure for \(bad)") }
             XCTAssertEqual(error.code, .badRequest)
@@ -569,7 +564,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(mock.requests[0].bodyJSON as NSDictionary, ["id": "T1", "serviceDate": "2026-08-21"] as NSDictionary)
         XCTAssertEqual(trip.mode, .bus)
         XCTAssertEqual(trip.bikesAllowed, .notAllowed)
-        XCTAssertEqual(trip.serviceDate, "2023-11-15")
+        // The requested date, not one derived from the stop times' serviceDay.
+        XCTAssertEqual(trip.serviceDate, "2026-08-21")
         XCTAssertEqual(trip.routeGtfsId, "1:R12")
         XCTAssertEqual(trip.routeColor, "FF0000")
         XCTAssertEqual(trip.routeTextColor, "FFFFFF")
@@ -590,10 +586,69 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(trip.stops[1].geometryIndex)
     }
 
-    func testTripWithoutServiceDateAndUnknownTrip() async throws {
+    func testTripSendsReliabilityOnlyWhenSetAndUnknownTripIsNotFound() async throws {
         let (client, mock) = makeClient { _ in json(#"{"trip":null}"#) }
-        let error = try await client.routing.trip("1:NOPE").error
-        XCTAssertEqual(mock.requests[0].bodyJSON as NSDictionary, ["id": "1:NOPE"] as NSDictionary)
+        let error = try await client.routing.trip("1:NOPE", serviceDate: "2026-08-21").error
+        XCTAssertEqual(mock.requests[0].bodyJSON as NSDictionary, ["id": "1:NOPE", "serviceDate": "2026-08-21"] as NSDictionary)
         XCTAssertEqual(error?.code, .notFound)
+        _ = try await client.routing.trip("1:NOPE", serviceDate: "2026-08-21", reliability: .safe)
+        XCTAssertEqual(
+            mock.requests[1].bodyJSON as NSDictionary,
+            ["id": "1:NOPE", "serviceDate": "2026-08-21", "reliability": "SAFE"] as NSDictionary
+        )
+    }
+
+    func testEstimatedDelaysGetsByQueryAndMapsByLevel() async throws {
+        // Entries out of order: mapped by `reliability`, not position.
+        let body = #"{"estimatedDelays":[{"reliability":"VERY_SAFE","delay":240},{"reliability":"STANDARD","delay":0},{"reliability":"SAFE","delay":90}]}"#
+        let (client, mock) = makeClient { _ in json(body) }
+        let result = try await client.routing.estimatedDelays("1:T 1", serviceDate: "2026-08-21", stopPosition: 3)
+        guard case .success(let delays?) = result else { return XCTFail("expected delays") }
+        XCTAssertEqual(delays, EstimatedDelays(standardSeconds: 0, safeSeconds: 90, verySafeSeconds: 240))
+        let req = mock.requests[0]
+        XCTAssertEqual(req.httpMethod, "GET")
+        XCTAssertEqual(req.url?.absoluteString, "https://env.api.example.com/routing/v1/estimated-delays?tripId=1:T%201&serviceDate=2026-08-21&stopPosition=3")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.6")
+        XCTAssertNotNil(req.value(forHTTPHeaderField: "x-spider-sdk"))
+        XCTAssertNil(req.value(forHTTPHeaderField: "if-none-match"))
+    }
+
+    func testEstimatedDelaysNullIsSuccess() async throws {
+        let (client, _) = makeClient { _ in json(#"{"estimatedDelays":null}"#) }
+        let result = try await client.routing.estimatedDelays("1:NOPE", serviceDate: "2026-08-21", stopPosition: 0)
+        guard case .success(let delays) = result else { return XCTFail("expected success") }
+        XCTAssertNil(delays)
+    }
+
+    func testEstimatedDelaysMissingOrUnknownLevelIsDecodingFailure() async throws {
+        for entries in [
+            #"[{"reliability":"STANDARD","delay":0},{"reliability":"SAFE","delay":90}]"#,
+            #"[{"reliability":"STANDARD","delay":0},{"reliability":"SAFE","delay":90},{"reliability":"P99","delay":300}]"#,
+        ] {
+            let (client, _) = makeClient { _ in json(#"{"estimatedDelays":\#(entries)}"#) }
+            let result = try await client.routing.estimatedDelays("1:T1", serviceDate: "2026-08-21", stopPosition: 0)
+            XCTAssertEqual(result.error?.code, .decoding, entries)
+        }
+    }
+
+    func testEstimatedDelaysRejectsMalformedServiceDateWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        for bad in ["", "20260821", "2026-02-30"] {
+            let error = try await client.routing.estimatedDelays("1:T1", serviceDate: bad, stopPosition: 0).error
+            XCTAssertEqual(error?.code, .badRequest)
+            XCTAssertEqual(error?.field, "serviceDate")
+            XCTAssertEqual(error?.message, "serviceDate is invalid")
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
+
+    func testEstimatedDelays400IsBadRequestWithField() async throws {
+        let (client, _) = makeClient { _ in
+            json(#"{"code":"bad_request","message":"stopPosition is invalid","field":"stopPosition"}"#, status: 400)
+        }
+        let error = try await client.routing.estimatedDelays("1:T1", serviceDate: "2026-08-21", stopPosition: -1).error
+        XCTAssertEqual(error?.code, .badRequest)
+        XCTAssertEqual(error?.field, "stopPosition")
     }
 }

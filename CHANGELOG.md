@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.6.0
+
+Targets Spider API contract 1.6.
+
+### Added
+
+- **`SpiderRouting.estimatedDelays(_:serviceDate:stopPosition:)`**: the recorded delay at one stop of a trip run
+  (`stopPosition` is a `TripStop.stopPosition`) at each level, as `EstimatedDelays` (`standardSeconds`,
+  `safeSeconds`, `verySafeSeconds`). History only, so it is there for a live trip too. Nil when the trip, the stop
+  position or the history is unknown.
+- **`reliability` on `departures` and `trip`**: the level `typicalDelaySeconds` is given at.
+- **`LiveVehicle.serviceDate`**: the service date of the trip run the vehicle is on.
+
+### Changed (breaking)
+
+- **`typicalDelaySeconds` is nil unless `reliability` is passed** on `departures` and `trip`; it was the median.
+- **A trip run is a trip id plus its service date.** `trip(_:serviceDate:)` requires `serviceDate` (there is no
+  "today"), and so do `vehicles(serviceDate:tripIds:)`, `vehicleForTrip(_:serviceDate:)`, `pollVehicles` and
+  `pollVehicleForTrip`. Pass a `Leg`'s or `Departure`'s `serviceDate`; a malformed one fails as `.badRequest`
+  without a request.
+- **`TripDetails.serviceDate` is non-optional**: the requested date.
+
 ## 1.5.0
 
 Targets Spider API contract 1.5.
