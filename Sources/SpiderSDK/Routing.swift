@@ -11,8 +11,8 @@ public struct Leg: Sendable, Equatable {
     // Realtime-estimated start/end times (ISO-8601) and the schedule deviation in seconds (positive = late,
     // negative = early), present when the trip is tracked. `isRealtime` is true when this leg carries live
     // data; `serviceDate` is the GTFS service date (`YYYY-MM-DD`) the trip runs on — pass it to
-    // `SpiderRouting.trip` and `SpiderRealtime.delays`, don't derive one from a clock time (GTFS times can
-    // exceed 24:00).
+    // `SpiderRouting.trip`, `SpiderRealtime.delays` and `SpiderRealtime.vehicles`, don't derive one from a clock
+    // time (GTFS times can exceed 24:00).
     public let startEstimated: String?
     public let endEstimated: String?
     public let startDelaySeconds: Int?
@@ -119,13 +119,14 @@ public struct Departure: Sendable, Equatable {
     public let realtimeTimeEpochMs: Int64
     public let isRealtime: Bool
     public let realtimeState: RealtimeState
-    /// The usual delay in seconds at this stop for this trip: the median for the service date's day type, from the
-    /// environment's realtime history. Nil when there is no history.
+    /// The delay in seconds at this stop for this trip at the requested reliability. Nil when no reliability is
+    /// passed, the trip has live realtime, or there is no history.
     public let typicalDelaySeconds: Int?
     public let headsign: String?
     public let tripGtfsId: String
     /// The GTFS service date (`YYYY-MM-DD`) this departure's trip runs on — the previous day for a night
-    /// departure past midnight. Pass it with `tripGtfsId` to `SpiderRouting.trip` and `SpiderRealtime.delays`.
+    /// departure past midnight. Pass it with `tripGtfsId` to `SpiderRouting.trip`, `SpiderRealtime.delays` and
+    /// `SpiderRealtime.vehicles`.
     public let serviceDate: String
     public let routeGtfsId: String
     public let routeShortName: String?
@@ -159,8 +160,8 @@ public struct TripStop: Sendable, Equatable {
     public let realtimeArrivalEpochMs: Int64
     public let realtimeDepartureEpochMs: Int64
     public let isRealtime: Bool
-    /// The usual delay in seconds at this stop for this trip: the median for the service date's day type, from the
-    /// environment's realtime history. Nil when there is no history.
+    /// The delay in seconds at this stop for this trip at the requested reliability. Nil when no reliability is
+    /// passed, the trip has live realtime, or there is no history.
     public let typicalDelaySeconds: Int?
     public let wheelchairBoarding: WheelchairBoarding?
     /// The platform (GTFS `platform_code`) and fare zone (GTFS `zone_id`) of the stop, when the feed has them.
@@ -173,6 +174,15 @@ public struct TripStop: Sendable, Equatable {
     /// The index into `TripDetails.geometry` of where the stop sits on the trip's line. Nil when the trip has no
     /// geometry or the stop has no point on it.
     public let geometryIndex: Int?
+}
+
+/// The per-level delay history at one stop of one trip run, in seconds. History only: live realtime never changes
+/// it, so it is present for a live trip whose `typicalDelaySeconds` is nil. For a trip without live realtime each
+/// level equals `trip`'s `typicalDelaySeconds` at that level wherever that is not nil. A level with no shift is 0.
+public struct EstimatedDelays: Sendable, Equatable {
+    public let standardSeconds: Int
+    public let safeSeconds: Int
+    public let verySafeSeconds: Int
 }
 
 /// A single trip's route, stops, and geometry.
@@ -193,9 +203,8 @@ public struct TripDetails: Sendable, Equatable {
     public let bikesAllowed: BikesAllowed?
     /// Whether a wheelchair user can ride this trip. Nil = no information.
     public let wheelchairAccessible: WheelchairBoarding?
-    /// The GTFS service date (`YYYY-MM-DD`) the stop times are for — the value to pass to
-    /// `SpiderRealtime.delays`. Nil when the trip has no stop times on the requested day.
-    public let serviceDate: String?
+    /// The GTFS service date (`YYYY-MM-DD`) requested — the value to pass to `SpiderRealtime.delays`.
+    public let serviceDate: String
     public let stops: [TripStop]
     public let geometry: [LatLon]
 }
@@ -270,6 +279,7 @@ private let MAX_VIA_STOP_IDS = 10
 private let MAX_VIA_WAIT_SECONDS = 3_600
 private let NO_CURSOR = "NoCursor"
 private let PLAN_STREAM_PATH = "/routing/v1/plan-stream"
+private let ESTIMATED_DELAYS_PATH = "/routing/v1/estimated-delays"
 
 // The transit modes valid in a modes filter — the street/leg modes (WALK/BICYCLE/CAR/TRANSIT) must not reach it.
 private let WIRE_TRANSIT_MODES: Set<String> = [
@@ -283,7 +293,8 @@ private let planIsoFormatter: ISO8601DateFormatter = {
     return f
 }()
 
-/// The routing surface: trip planning (`plan` + paging + streaming), stop `departures`, and single `trip` detail.
+/// The routing surface: trip planning (`plan` + paging + streaming), stop `departures`, single `trip` detail, and a
+/// trip stop's `estimatedDelays`.
 public final class SpiderRouting {
     private let transport: Transport
 
@@ -376,11 +387,13 @@ public final class SpiderRouting {
     /// Departures from a stop, soonest first: at most `numberOfDepartures` (from 1 up to the environment's
     /// limit), leaving within `timeRangeSeconds` (above 0, up to 24 h) of `startTime` (nil = now). A
     /// `timeRangeSeconds` outside that range fails as `.badRequest` (field `timeRange`) without a request.
+    /// `reliability` is the level `typicalDelaySeconds` is given at; nil leaves it nil.
     public func departures(
         _ stopId: String,
         numberOfDepartures: Int = 30,
         startTime: Date? = nil,
-        timeRangeSeconds: Int = 86_400
+        timeRangeSeconds: Int = 86_400,
+        reliability: Reliability? = nil
     ) async throws -> SpiderResult<[Departure]> {
         guard (1...MAX_TIME_RANGE_SECONDS).contains(timeRangeSeconds) else { return .failure(outOfRange("timeRange")) }
         do {
@@ -388,7 +401,8 @@ public final class SpiderRouting {
                 id: stopId,
                 numberOfDepartures: numberOfDepartures,
                 timeRange: timeRangeSeconds,
-                startTime: startTime.map { Int($0.timeIntervalSince1970.rounded(.down)) }
+                startTime: startTime.map { Int($0.timeIntervalSince1970.rounded(.down)) },
+                reliability: reliabilityInput(reliability)
             )
             let response: DeparturesResponse = try await transport.postJson("/routing/v1/departures", body)
             guard let stop = response.stop else {
@@ -400,18 +414,38 @@ public final class SpiderRouting {
         }
     }
 
-    /// A single trip's stops, times, and geometry on `serviceDate` (`YYYY-MM-DD`, e.g. a `Departure`'s or
-    /// `Leg`'s `serviceDate`; nil = today). A malformed date fails as `.badRequest` without a request.
-    public func trip(_ tripId: String, serviceDate: String? = nil) async throws -> SpiderResult<TripDetails> {
-        if let serviceDate, !isServiceDate(serviceDate) {
-            return .failure(invalid("serviceDate"))
-        }
+    /// A single trip run's stops, times, and geometry: `tripId` on `serviceDate` (`YYYY-MM-DD`, a `Leg`'s or
+    /// `Departure`'s `serviceDate`). `reliability` is the level `typicalDelaySeconds` is given at; nil leaves it nil.
+    /// A malformed date fails as `.badRequest` without a request.
+    public func trip(_ tripId: String, serviceDate: String, reliability: Reliability? = nil) async throws -> SpiderResult<TripDetails> {
+        guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
         do {
-            let response: TripResponse = try await transport.postJson("/routing/v1/trip", TripRequest(id: tripId, serviceDate: serviceDate))
+            let body = TripRequest(id: tripId, serviceDate: serviceDate, reliability: reliabilityInput(reliability))
+            let response: TripResponse = try await transport.postJson("/routing/v1/trip", body)
             guard let trip = response.trip else {
                 throw TransportError(.noData, "routing returned no trip for id=\(tripId)")
             }
-            return .success(mapTrip(trip))
+            return .success(mapTrip(trip, serviceDate: serviceDate))
+        } catch {
+            return .failure(toSpiderError(error))
+        }
+    }
+
+    /// The delay history at one stop of a trip run: `tripId` on `serviceDate` (`YYYY-MM-DD`, a `Leg`'s or
+    /// `Departure`'s `serviceDate`), at `stopPosition` (a `TripStop.stopPosition`). Nil when the trip, the stop
+    /// position or the history is unknown. A malformed date fails as `.badRequest` without a request.
+    public func estimatedDelays(
+        _ tripId: String,
+        serviceDate: String,
+        stopPosition: Int
+    ) async throws -> SpiderResult<EstimatedDelays?> {
+        guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
+        do {
+            let response: EstimatedDelaysResponse = try await transport.getJson(
+                ESTIMATED_DELAYS_PATH,
+                query: [("tripId", tripId), ("serviceDate", serviceDate), ("stopPosition", String(stopPosition))]
+            )
+            return .success(try response.estimatedDelays.map(mapEstimatedDelays))
         } catch {
             return .failure(toSpiderError(error))
         }
@@ -743,7 +777,7 @@ private func mapDepartures(_ stop: DepartureBoard) -> [Departure] {
             typicalDelaySeconds: st.typicalDelay,
             headsign: st.headsign,
             tripGtfsId: st.trip.gtfsId,
-            serviceDate: isoServiceDate(ofServiceDay: st.serviceDay),
+            serviceDate: st.serviceDate,
             routeGtfsId: route.gtfsId,
             routeShortName: route.shortName,
             routeLongName: route.longName,
@@ -758,7 +792,7 @@ private func mapDepartures(_ stop: DepartureBoard) -> [Departure] {
     }
 }
 
-private func mapTrip(_ w: TripTimetable) -> TripDetails {
+private func mapTrip(_ w: TripTimetable, serviceDate: String) -> TripDetails {
     let stops = w.stoptimesForDate.map { st in
         let s = st.stop
         func at(_ offset: Int) -> Int64 { Int64(st.serviceDay + offset) * 1000 }
@@ -792,10 +826,27 @@ private func mapTrip(_ w: TripTimetable) -> TripDetails {
         directionId: w.directionId,
         bikesAllowed: BikesAllowed.fromWire(w.bikesAllowed.rawValue),
         wheelchairAccessible: WheelchairBoarding.fromWire(w.wheelchairAccessible.rawValue),
-        serviceDate: w.stoptimesForDate.first.map { isoServiceDate(ofServiceDay: $0.serviceDay) },
+        serviceDate: serviceDate,
         stops: stops,
         geometry: w.tripGeometry.map { decodePolyline($0.points) } ?? []
     )
+}
+
+// Keyed by each entry's `reliability`, not its position; a missing or unknown level is a decoding failure.
+private func mapEstimatedDelays(_ entries: [EstimatedDelay]) throws -> EstimatedDelays {
+    var byLevel: [SpiderContract.Reliability: Int] = [:]
+    for entry in entries { byLevel[entry.reliability] = entry.delay }
+    guard let standard = byLevel[.standard], let safe = byLevel[.safe], let verySafe = byLevel[.verySafe],
+          byLevel[.unknown] == nil else {
+        let levels = entries.map(\.reliability.rawValue)
+        throw SpiderDecodingError(
+            message: "failed to decode GET \(ESTIMATED_DELAYS_PATH)",
+            cause: DecodingError.dataCorrupted(.init(
+                codingPath: [], debugDescription: "estimatedDelays needs STANDARD, SAFE and VERY_SAFE, got \(levels)"
+            ))
+        )
+    }
+    return EstimatedDelays(standardSeconds: standard, safeSeconds: safe, verySafeSeconds: verySafe)
 }
 
 // MARK: - SSE plan-stream parsing

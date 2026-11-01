@@ -6,14 +6,14 @@ private let DEFAULT_POLL_INTERVAL_MS = 15_000
 /// value only when the result changes (by value equality) from the previous one. Cancel the consuming task
 /// (or break out of the `for await`) to stop polling — the stream finishes without throwing on cancel.
 extension SpiderRealtime {
-    /// Polls `vehicles(_:)`.
-    public func pollVehicles(_ tripIds: [String], intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<VehiclePositions>, Error> {
-        poll(intervalMs: intervalMs) { try await self.vehicles(tripIds) }
+    /// Polls `vehicles(serviceDate:tripIds:)`.
+    public func pollVehicles(serviceDate: String, tripIds: [String], intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<VehiclePositions>, Error> {
+        poll(intervalMs: intervalMs) { try await self.vehicles(serviceDate: serviceDate, tripIds: tripIds) }
     }
 
-    /// Polls `vehicleForTrip(_:)`.
-    public func pollVehicleForTrip(_ tripId: String, intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<LiveVehicleUpdate>, Error> {
-        poll(intervalMs: intervalMs) { try await self.vehicleForTrip(tripId) }
+    /// Polls `vehicleForTrip(_:serviceDate:)`.
+    public func pollVehicleForTrip(_ tripId: String, serviceDate: String, intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<LiveVehicleUpdate>, Error> {
+        poll(intervalMs: intervalMs) { try await self.vehicleForTrip(tripId, serviceDate: serviceDate) }
     }
 
     /// Polls `delays(serviceDate:tripIds:)`.

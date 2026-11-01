@@ -47,7 +47,8 @@ func poll(client: SpiderClient) async throws {
 /// A change-detecting stream of vehicle positions via the SDK's built-in polling helper (yields only when the data changes).
 func pollHelper(client: SpiderClient) async throws {
     // [START pollHelper]
-    for try await update in client.realtime.pollVehicles(["1:T-1", "1:T-2"], intervalMs: 15_000) {
+    // A run is a trip id plus its GTFS service date — take it from the leg's or departure's `serviceDate`.
+    for try await update in client.realtime.pollVehicles(serviceDate: "2026-01-01", tripIds: ["1:T-1", "1:T-2"], intervalMs: 15_000) {
         if case .success(let positions) = update {
             for vehicle in positions.vehicles {
                 placeMarker(lat: vehicle.latitude, lon: vehicle.longitude)
@@ -60,7 +61,7 @@ func pollHelper(client: SpiderClient) async throws {
 /// Fetch live vehicle positions for a set of trips.
 func vehicles(client: SpiderClient) async throws {
     // [START vehicles]
-    let result = try await client.realtime.vehicles(["1:T-1", "1:T-2"])
+    let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T-1", "1:T-2"])
     if case .success(let positions) = result {
         for vehicle in positions.vehicles {
             print("\(vehicle.tripId) at \(vehicle.latitude),\(vehicle.longitude)")
@@ -70,9 +71,9 @@ func vehicles(client: SpiderClient) async throws {
 }
 
 /// The live vehicle for one trip — a 404 is a normal "none currently reporting", not an error.
-func vehicleForTrip(client: SpiderClient, tripId: String) async throws {
+func vehicleForTrip(client: SpiderClient, tripId: String, serviceDate: String) async throws {
     // [START vehicleForTrip]
-    let result = try await client.realtime.vehicleForTrip(tripId)
+    let result = try await client.realtime.vehicleForTrip(tripId, serviceDate: serviceDate)
     if case .success(let update) = result {
         if let vehicle = update.vehicle {
             placeMarker(lat: vehicle.latitude, lon: vehicle.longitude)

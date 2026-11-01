@@ -194,7 +194,8 @@ func streamEarlierItineraries(client: SpiderClient) async throws {
 /// Look up a single trip's timetable.
 func tripLookup(client: SpiderClient) async throws {
     // [START tripLookup]
-    let result = try await client.routing.trip("1:12345")
+    // A trip run is the trip id plus its GTFS service date — take it from a leg's or departure's `serviceDate`.
+    let result = try await client.routing.trip("1:12345", serviceDate: "2026-01-01")
     if case .success(let trip) = result {
         for stop in trip.stops {
             let arrival = stop.scheduledArrivalEpochMs
@@ -203,6 +204,21 @@ func tripLookup(client: SpiderClient) async throws {
         }
     }
     // [END tripLookup]
+}
+
+/// The recorded delay at one stop of a trip run, at each reliability level.
+func estimatedDelays(client: SpiderClient) async throws {
+    // [START estimatedDelays]
+    let result = try await client.routing.estimatedDelays("1:12345", serviceDate: "2026-01-01", stopPosition: 3)
+    switch result {
+    case .success(let delays?):
+        print("p50 \(delays.standardSeconds)s, p70 \(delays.safeSeconds)s, p90 \(delays.verySafeSeconds)s")
+    case .success(nil):
+        print("no delay history for this stop")
+    case .failure(let error):
+        print("estimatedDelays failed: \(error.message)")
+    }
+    // [END estimatedDelays]
 }
 
 /// Restrict the search to specific transit modes (here tram + subway only).

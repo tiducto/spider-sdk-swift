@@ -46,14 +46,14 @@ func handleResult(client: SpiderClient) async throws {
 }
 
 /// The same client reaches the stops and realtime surfaces too.
-func otherSurfaces(client: SpiderClient, tripId: String) async throws {
+func otherSurfaces(client: SpiderClient, tripId: String, serviceDate: String) async throws {
     // [START otherSurfaces]
     let stops = try await client.stops.search(StopFilter(name: "central"))
     if case .success(let hits) = stops {
         print("found \(hits.count) matching stops")
     }
 
-    let vehicle = try await client.realtime.vehicleForTrip(tripId)
+    let vehicle = try await client.realtime.vehicleForTrip(tripId, serviceDate: serviceDate)
     if case .success(let update) = vehicle, let live = update.vehicle {
         print("vehicle at \(live.latitude),\(live.longitude)")
     }

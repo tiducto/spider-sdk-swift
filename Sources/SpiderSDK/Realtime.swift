@@ -13,6 +13,8 @@ public struct FeedFreshness: Sendable, Equatable {
 /// routing's ids.
 public struct LiveVehicle: Sendable, Equatable {
     public let tripId: String
+    /// The GTFS service date (`YYYY-MM-DD`) of the trip run the vehicle is on.
+    public let serviceDate: String
     public let routeId: String?
     public let vehicleId: String?
     public let label: String?
@@ -118,13 +120,19 @@ public final class SpiderRealtime {
         self.transport = transport
     }
 
-    /// Live positions for the given feed-prefixed trip ids (`<feedId>:<id>`), up to 50 per call. No trip ids return an empty result without a
-    /// request; more than 50 fail as `.badRequest` (field `tripIds`) without a request.
-    public func vehicles(_ tripIds: [String]) async throws -> SpiderResult<VehiclePositions> {
+    /// Live positions for the runs of the given feed-prefixed trip ids (`<feedId>:<id>`) on one GTFS `serviceDate`
+    /// (`YYYY-MM-DD`): pass a leg's or departure's `serviceDate`. A vehicle counts only while it runs that run, so a
+    /// future date has none. Up to 50 ids per call. No trip ids return an empty result without a request; a
+    /// malformed date or more than 50 ids fail as `.badRequest` without a request.
+    public func vehicles(serviceDate: String, tripIds: [String]) async throws -> SpiderResult<VehiclePositions> {
+        guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
         guard !tripIds.isEmpty else { return .success(EMPTY_POSITIONS) }
         guard tripIds.count <= MAX_TRIP_IDS else { return .failure(outOfRange("tripIds")) }
         do {
-            let dto: VehiclesResponse = try await transport.getJson("/realtime/v1/vehicles", query: [("tripIds", tripIds.joined(separator: ","))])
+            let dto: VehiclesResponse = try await transport.getJson(
+                "/realtime/v1/vehicles",
+                query: [("serviceDate", serviceDate), ("tripIds", tripIds.joined(separator: ","))]
+            )
             let positions = VehiclePositions(
                 vehicles: dto.vehicles.map(mapVehicle),
                 missing: dto.missing,
@@ -136,12 +144,15 @@ public final class SpiderRealtime {
         }
     }
 
-    /// The live vehicle for a single trip. A 404 is a normal "no vehicle currently reporting", not an error.
-    public func vehicleForTrip(_ tripId: String) async throws -> SpiderResult<LiveVehicleUpdate> {
+    /// The live vehicle for a single trip run: `tripId` on GTFS `serviceDate` (`YYYY-MM-DD`, a leg's or
+    /// departure's `serviceDate`). A 404 is a normal "no vehicle currently reporting", not an error. A malformed
+    /// date fails as `.badRequest` without a request.
+    public func vehicleForTrip(_ tripId: String, serviceDate: String) async throws -> SpiderResult<LiveVehicleUpdate> {
+        guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
         do {
             let encoded = tripId.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed) ?? tripId
             let path = "/realtime/v1/vehicles/by-trip/\(encoded)"
-            let raw = try await transport.getRaw(path)
+            let raw = try await transport.getRaw(path, query: [("serviceDate", serviceDate)])
             if !raw.ok, let limit = planLimitError(status: raw.status, envelope: parseErrorEnvelope(raw.text)) {
                 throw limit
             }
@@ -219,7 +230,7 @@ private func mapFreshness(_ feedTimestamp: Int64?, _ staleSeconds: Int?) -> Feed
 
 private func mapVehicle(_ v: VehicleDto) -> LiveVehicle {
     LiveVehicle(
-        tripId: v.tripId, routeId: v.routeId, vehicleId: v.vehicleId, label: v.label,
+        tripId: v.tripId, serviceDate: v.serviceDate, routeId: v.routeId, vehicleId: v.vehicleId, label: v.label,
         latitude: v.latitude, longitude: v.longitude, bearing: v.bearing, speed: v.speed,
         stopId: v.stopId, currentStatus: v.currentStatus,
         occupancy: OccupancyStatus.fromWire(v.occupancyStatus),
@@ -256,6 +267,7 @@ private func mapAlert(_ a: AlertDto) -> ServiceAlert {
 
 private struct VehicleDto: Decodable {
     let tripId: String
+    let serviceDate: String
     let routeId: String?
     let vehicleId: String?
     let label: String?
