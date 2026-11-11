@@ -9,7 +9,7 @@ final class PlanLimitTests: XCTestCase {
     private let agreementBody = #"{"error":"agreement_inactive","message":"agreement is not active"}"#
 
     private static let surfaces = [
-        "plan", "departures", "trip", "estimatedDelays", "stops.search", "stops.byId",
+        "plan", "departures", "trip", "estimatedDelays", "stops.search", "stops.byId", "places.search",
         "realtime.vehicles", "realtime.vehicleForTrip", "realtime.delays", "realtime.alerts",
     ]
 
@@ -32,6 +32,7 @@ final class PlanLimitTests: XCTestCase {
         } catch let error as SpiderError {
             errors.append(("stops.byId", error))
         }
+        record("places.search", try await client.places.search("Main"))
         record("realtime.vehicles", try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T1"]))
         record("realtime.vehicleForTrip", try await client.realtime.vehicleForTrip("1:T1", serviceDate: "2026-01-01"))
         record("realtime.delays", try await client.realtime.delays(serviceDate: "2026-01-01", tripIds: ["1:T1"]))

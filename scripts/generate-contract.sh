@@ -84,4 +84,4 @@ mkdir -p "$ROUTING_DIR"
 cp "$WORK_DIR"/gen/*.swift "$ROUTING_DIR/"
 
 echo "==> Done. $(ls "$ROUTING_DIR"/*.swift | wc -l | tr -d ' ') model files."
-echo "    The stops + realtime wire types are hand-written (Sources/SpiderSDK/{Stops,Realtime}.swift), not generated."
+echo "    The stops, places + realtime wire types are hand-written (Sources/SpiderSDK/{Stops,Places,Realtime}.swift), not generated."
