@@ -56,8 +56,8 @@ public final class SpiderPlaces {
     ///
     /// Abbreviated and spelled-out forms find each other, and text without diacritics matches text with them. A
     /// query with a house number (any digit, e.g. `Údolní 53`) lists individual addresses; without one, it lists
-    /// stops, municipalities and points of interest, and no addresses. Pass `near` to rank the nearer of equally good matches first and to get each hit's
-    /// `distance`.
+    /// stops, municipalities and points of interest, and no addresses. Pass `near` to rank the nearer of equally
+    /// good matches first and to get each hit's `distance`.
     ///
     /// - Parameters:
     ///   - query: The search text, 2 to 100 characters after trimming whitespace.
