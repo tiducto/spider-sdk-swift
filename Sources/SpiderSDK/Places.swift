@@ -39,6 +39,8 @@ public struct PlaceHit: Sendable, Equatable {
     public let suburb: String?
     /// Metres from the search location; present only when the search was given one.
     public let distance: Int?
+    /// For a `.stop`, the stop as stop search returns it (code, wheelchair boarding, modes included); nil otherwise.
+    public let stop: Stop?
 }
 
 private let MAX_PLACE_SEARCH_LIMIT = 20
@@ -97,20 +99,35 @@ private func toPlaceHit(_ hit: PlaceHitWire) -> PlaceHit {
     PlaceHit(
         id: hit.id, type: PlaceType.fromWire(hit.type), name: hit.name, lat: hit.lat, lon: hit.lon,
         category: hit.category, country: hit.country, region: hit.region, district: hit.district,
-        city: hit.city, suburb: hit.suburb, distance: hit.distance
+        city: hit.city, suburb: hit.suburb, distance: hit.distance, stop: stopOf(hit)
     )
+}
+
+// A stop hit carries its stop search hit's members under the same names; other types carry no `gtfsId`.
+private func stopOf(_ hit: PlaceHitWire) -> Stop? {
+    guard hit.type == PlaceType.stop.rawValue, let gtfsId = hit.gtfsId else { return nil }
+    return toStop(StopHit(
+        gtfsId: gtfsId, name: hit.name, code: hit.code, wheelchairBoarding: hit.wheelchairBoarding,
+        modes: hit.modes, lat: hit.lat, lon: hit.lon, country: hit.country, region: hit.region,
+        district: hit.district, city: hit.city, suburb: hit.suburb
+    ))
 }
 
 // MARK: - wire types (hand-written; not generated)
 
 private struct PlaceSearchResponse: Decodable {
     let hits: [PlaceHitWire]
+    let query: String?
 }
 
 private struct PlaceHitWire: Decodable {
     let id: String
     let type: String
+    let gtfsId: String?
     let name: String
+    let code: String?
+    let wheelchairBoarding: Int?
+    let modes: [String]?
     let lat: Double
     let lon: Double
     let category: String?
