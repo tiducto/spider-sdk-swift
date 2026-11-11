@@ -6,8 +6,6 @@ public struct Stop: Sendable, Equatable {
     public let name: String
     /// The short public code riders know the stop by (GTFS `stop_code`), when the feed has one.
     public let code: String?
-    /// GTFS `location_type`: `0` a stop or platform, `1` a station. Nil means a stop.
-    public let locationType: Int?
     /// Whether a rider in a wheelchair can board here (GTFS `wheelchair_boarding`). Nil = no information; a code
     /// GTFS doesn't define is `.unknown`.
     public let wheelchairBoarding: WheelchairBoarding?
@@ -204,9 +202,10 @@ private func extractStopError(_ text: String) -> String {
     return String(text.prefix(300))
 }
 
-private func toStop(_ hit: StopHit) -> Stop {
+// Shared with place search, whose stop hits carry the same members.
+func toStop(_ hit: StopHit) -> Stop {
     Stop(
-        gtfsId: hit.gtfsId, name: hit.name, code: hit.code, locationType: hit.locationType,
+        gtfsId: hit.gtfsId, name: hit.name, code: hit.code,
         wheelchairBoarding: wheelchairBoarding(gtfs: hit.wheelchairBoarding),
         modes: (hit.modes ?? []).map { TransitMode(rawValue: $0) ?? .unknown }, lat: hit.lat, lon: hit.lon,
         country: hit.country, region: hit.region, district: hit.district, city: hit.city, suburb: hit.suburb
@@ -238,11 +237,10 @@ private struct StopSearchResponse: Decodable {
     let query: String
 }
 
-private struct StopHit: Decodable {
+struct StopHit: Decodable {
     let gtfsId: String
     let name: String
     let code: String?
-    let locationType: Int?
     let wheelchairBoarding: Int?
     let modes: [String]?
     let lat: Double

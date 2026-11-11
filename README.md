@@ -14,7 +14,7 @@ Swift Package Manager. In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tiducto/spider-sdk-swift.git", from: "1.7.1"),
+    .package(url: "https://github.com/tiducto/spider-sdk-swift.git", from: "1.8.0"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: [.product(name: "SpiderSDK", package: "spider-sdk-swift")]),

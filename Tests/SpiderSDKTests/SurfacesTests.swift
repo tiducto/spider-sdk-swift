@@ -4,7 +4,7 @@ import XCTest
 final class StopsTests: XCTestCase {
     func testSearchBuildsFilterExpressionWithEscapingAndMapsHits() async throws {
         let body = """
-        {"hits":[{"gtfsId":"S1","name":"Main","code":"1234","locationType":1,"wheelchairBoarding":2,"modes":["BUS","TRAM","HOVERCRAFT"],"lat":49.1,"lon":16.6,"country":"CZ","city":"Brno"},
+        {"hits":[{"gtfsId":"S1","name":"Main","code":"1234","wheelchairBoarding":2,"modes":["BUS","TRAM","HOVERCRAFT"],"lat":49.1,"lon":16.6,"country":"CZ","city":"Brno"},
                  {"gtfsId":"S2","name":"Side","wheelchairBoarding":0,"lat":49.2,"lon":16.7},
                  {"gtfsId":"S3","name":"Odd","wheelchairBoarding":7,"lat":49.3,"lon":16.8}],"query":"Main"}
         """
@@ -15,12 +15,10 @@ final class StopsTests: XCTestCase {
         XCTAssertEqual(stops[0].gtfsId, "S1")
         XCTAssertEqual(stops[0].city, "Brno")
         XCTAssertEqual(stops[0].code, "1234")
-        XCTAssertEqual(stops[0].locationType, 1)
         XCTAssertEqual(stops[0].wheelchairBoarding, .notPossible)
         XCTAssertEqual(stops[0].modes, [.bus, .tram, .unknown]) // a mode this SDK doesn't know -> unknown
         // Absent fields stay nil (modes empty); GTFS 0 (no information) maps to nil like routing's NO_INFORMATION.
         XCTAssertNil(stops[1].code)
-        XCTAssertNil(stops[1].locationType)
         XCTAssertNil(stops[1].wheelchairBoarding)
         XCTAssertEqual(stops[1].modes, [])
         XCTAssertEqual(stops[2].wheelchairBoarding, .unknown) // a code GTFS doesn't define
@@ -337,6 +335,6 @@ final class EnumsAndPolylineTests: XCTestCase {
 
     func testClientExposesContractVersion() {
         let (client, _) = makeClient { _ in json("{}") }
-        XCTAssertEqual(client.contractVersion, "1.7")
+        XCTAssertEqual(client.contractVersion, "1.8")
     }
 }
