@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.0
+
+Targets Spider API contract 1.7.
+
+### Added
+
+- **`client.places`**: place search over the environment's service area. `SpiderPlaces.search(_:near:limit:)`
+  takes the search text, an optional `GeoPoint` to rank the nearer of equally good matches first, and `limit`
+  (1 to 20, default 10; outside that range it fails as `.badRequest` without a request). It returns `[PlaceHit]`,
+  best first: `id`, `type`, `name`, `lat`/`lon`, `category`, the same admin labels a `Stop` carries, and
+  `distance` in metres when `near` was passed. A query with a house number lists individual addresses.
+- **`PlaceType`**: `.stop`, `.address`, `.street`, `.place` (a municipality), `.poi` and `.unknown` for a kind
+  added later. A `.stop` hit's `id` is the stop id routing takes.
+- **`SpiderClientOptions.places`**: the surface's own retry options, like `stops`.
+
 ## 1.6.0
 
 Targets Spider API contract 1.6.

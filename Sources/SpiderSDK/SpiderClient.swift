@@ -7,7 +7,7 @@ public struct AutoRetryOptions: Sendable {
     public init(maxAttempts: Int? = nil) { self.maxAttempts = maxAttempts }
 }
 
-/// Feature toggles for one surface (routing / stops / realtime).
+/// Feature toggles for one surface (routing / stops / places / realtime).
 public struct FeatureOptions: Sendable {
     public var autoRetry: AutoRetryOptions?
     public init(autoRetry: AutoRetryOptions? = nil) { self.autoRetry = autoRetry }
@@ -21,6 +21,7 @@ public struct SpiderClientOptions {
     public var timeout: TimeInterval?
     public var routing: FeatureOptions?
     public var stops: FeatureOptions?
+    public var places: FeatureOptions?
     public var realtime: FeatureOptions?
 
     public init(
@@ -28,22 +29,25 @@ public struct SpiderClientOptions {
         timeout: TimeInterval? = nil,
         routing: FeatureOptions? = nil,
         stops: FeatureOptions? = nil,
+        places: FeatureOptions? = nil,
         realtime: FeatureOptions? = nil
     ) {
         self.httpClient = httpClient
         self.timeout = timeout
         self.routing = routing
         self.stops = stops
+        self.places = places
         self.realtime = realtime
     }
 }
 
 /// The Spider API client. Construct once with your environment base URL and API key, then reach a surface:
-/// `client.routing`, `client.stops`, `client.realtime`. Each surface gets its own transport (own retry config)
+/// `client.routing`, `client.stops`, `client.places`, `client.realtime`. Each surface gets its own transport (own retry config)
 /// sharing the same base URL, key, HTTP client and timeout.
 public final class SpiderClient {
     public let routing: SpiderRouting
     public let stops: SpiderStops
+    public let places: SpiderPlaces
     public let realtime: SpiderRealtime
 
     // Shares the same HTTP client (URLSession) as every surface, so the connection `warmup()` opens is the
@@ -65,6 +69,7 @@ public final class SpiderClient {
 
         self.routing = SpiderRouting(transport: transport(options.routing))
         self.stops = SpiderStops(transport: transport(options.stops))
+        self.places = SpiderPlaces(transport: transport(options.places))
         self.realtime = SpiderRealtime(transport: transport(options.realtime))
         self.warmupTransport = transport(nil)
     }
