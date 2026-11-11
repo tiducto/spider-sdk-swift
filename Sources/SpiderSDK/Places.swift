@@ -7,8 +7,6 @@ public enum PlaceType: String, Sendable, CaseIterable {
     case stop
     /// A single address (a building with a house number).
     case address
-    /// A street, standing for its addresses.
-    case street
     /// A municipality.
     case place
     /// A point of interest: a university, a hospital, a shopping centre, …
@@ -20,7 +18,7 @@ public enum PlaceType: String, Sendable, CaseIterable {
     }
 }
 
-/// One place search hit: a stop, an address, a street, a municipality or a point of interest.
+/// One place search hit: a stop, an address, a municipality or a point of interest.
 public struct PlaceHit: Sendable, Equatable {
     /// For a `.stop`, the feed-prefixed stop id (`<feedId>:<id>`) routing takes. For any other type an opaque id,
     /// stable across searches.
@@ -31,8 +29,7 @@ public struct PlaceHit: Sendable, Equatable {
     public let lat: Double
     public let lon: Double
     /// What kind of place it is: for a `.poi` e.g. `university`, `hospital`, `mall`; `municipality` for a `.place`;
-    /// `building` (or `recreational`) for an `.address`; `street` for a `.street`. Nil for a stop. New values may be
-    /// added.
+    /// `building` (or `recreational`) for an `.address`. Nil for a stop. New values may be added.
     public let category: String?
     /// The administrative areas the place lies in, labelled the same way as a `Stop`'s.
     public let country: String?
@@ -46,8 +43,8 @@ public struct PlaceHit: Sendable, Equatable {
 
 private let MAX_PLACE_SEARCH_LIMIT = 20
 
-/// The places surface: search over stops, addresses, streets, municipalities and points of interest in the
-/// environment's service area.
+/// The places surface: search over stops, addresses, municipalities and points of interest in the environment's
+/// service area.
 public final class SpiderPlaces {
     private let transport: Transport
 
@@ -58,8 +55,8 @@ public final class SpiderPlaces {
     /// Searches places by free text, best match first.
     ///
     /// Abbreviated and spelled-out forms find each other, and text without diacritics matches text with them. A
-    /// query with a house number (any digit, e.g. `Údolní 53`) lists individual addresses; without one, a street
-    /// stands for its addresses. Pass `near` to rank the nearer of equally good matches first and to get each hit's
+    /// query with a house number (any digit, e.g. `Údolní 53`) lists individual addresses; without one, it lists
+    /// stops, municipalities and points of interest, and no addresses. Pass `near` to rank the nearer of equally good matches first and to get each hit's
     /// `distance`.
     ///
     /// - Parameters:

@@ -17,7 +17,7 @@ final class PlacesTests: XCTestCase {
         XCTAssertNil(req.httpBody)
         XCTAssertEqual(queryItems(req), [URLQueryItem(name: "q", value: "Hlavní nádraží"), URLQueryItem(name: "limit", value: "10")])
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.7.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.7.1")
         XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.7")
     }
 
@@ -56,7 +56,7 @@ final class PlacesTests: XCTestCase {
         """
         let (client, _) = makeClient { _ in json(body) }
         let hits = try await client.places.search("brno").get()
-        XCTAssertEqual(hits.map(\.type), [.stop, .poi, .address, .street, .place, .unknown])
+        XCTAssertEqual(hits.map(\.type), [.stop, .poi, .address, .unknown, .place, .unknown])
         XCTAssertEqual(hits[0], PlaceHit(
             id: "1:U1234Z1", type: .stop, name: "Hlavní nádraží", lat: 49.190612, lon: 16.612951, category: nil,
             country: "Česko", region: "Jihomoravský kraj", district: "okres Brno-město", city: "Brno",

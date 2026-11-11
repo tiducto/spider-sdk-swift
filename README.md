@@ -14,7 +14,7 @@ Swift Package Manager. In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tiducto/spider-sdk-swift.git", from: "1.6.0"),
+    .package(url: "https://github.com/tiducto/spider-sdk-swift.git", from: "1.7.1"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: [.product(name: "SpiderSDK", package: "spider-sdk-swift")]),
@@ -56,7 +56,7 @@ Failures are values — every call returns a `SpiderResult<T>` you branch on.
 
 - **`client.routing`** — trip planning (with paging and a streaming `planStream` / `planStreamNext` / `planStreamPrevious`), departures, and single-trip lookups.
 - **`client.stops`** — text search, geo queries (nearest / bounding box), and lookup by GTFS id.
-- **`client.places`** — one search over stops, addresses, streets, municipalities and points of interest, optionally ranked by distance from a location.
+- **`client.places`** — one search over stops, addresses, municipalities and points of interest, optionally ranked by distance from a location.
 - **`client.realtime`** — poll-based live vehicle positions, delays, and alerts, plus change-detecting `poll…` streams (no push connections).
 
 **Full API reference and guides → [docs.tiducto.eu](https://docs.tiducto.eu).** Product overview → [tiducto.eu](https://tiducto.eu).

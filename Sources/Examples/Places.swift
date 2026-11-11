@@ -1,7 +1,7 @@
 import Foundation
 import SpiderSDK
 
-/// Search places — stops, addresses, streets, municipalities and points of interest — near the rider.
+/// Search places — stops, addresses, municipalities and points of interest — near the rider.
 func searchPlaces(client: SpiderClient) async throws {
     // [START searchPlaces]
     let result = try await client.places.search("Údolní 53", near: GeoPoint(lat: 49.1951, lng: 16.6068))
@@ -11,7 +11,7 @@ func searchPlaces(client: SpiderClient) async throws {
             case .stop:
                 // A stop's id is the one routing takes.
                 print("stop \(hit.name) (\(hit.id))")
-            case .address, .street, .place, .poi:
+            case .address, .place, .poi:
                 let distance = hit.distance.map { " — \($0) m" } ?? ""
                 print("\(hit.name), \(hit.city ?? "?")\(distance)")
             case .unknown:
