@@ -117,7 +117,7 @@ private func stopOf(_ hit: PlaceHitWire) -> Stop? {
 
 private struct PlaceSearchResponse: Decodable {
     let hits: [PlaceHitWire]
-    let query: String?
+    let query: String
 }
 
 private struct PlaceHitWire: Decodable {
