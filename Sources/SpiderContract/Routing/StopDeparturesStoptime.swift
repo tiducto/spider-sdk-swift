@@ -10,6 +10,10 @@ public struct StopDeparturesStoptime: Codable, Sendable {
     /// True when `realtimeDeparture` comes from realtime.
     public let realtime: Bool
     public let realtimeState: RealtimeState
+    /// How a rider boards here. Never `NONE`: the board leaves out departures nobody can board.
+    public let pickupType: PickupDropoffType
+    /// How a rider alights here.
+    public let dropoffType: PickupDropoffType
     /// The platform or stand the departure leaves from, which tells a station's platforms apart.
     public let stop: StopDeparturesStop
     public let trip: StopDeparturesTrip
@@ -27,6 +31,8 @@ public struct StopDeparturesStoptime: Codable, Sendable {
         realtimeDeparture: Int,
         realtime: Bool,
         realtimeState: RealtimeState,
+        pickupType: PickupDropoffType,
+        dropoffType: PickupDropoffType,
         stop: StopDeparturesStop,
         trip: StopDeparturesTrip,
         typicalDelay: Int? = nil,
@@ -39,6 +45,8 @@ public struct StopDeparturesStoptime: Codable, Sendable {
         self.realtimeDeparture = realtimeDeparture
         self.realtime = realtime
         self.realtimeState = realtimeState
+        self.pickupType = pickupType
+        self.dropoffType = dropoffType
         self.stop = stop
         self.trip = trip
         self.typicalDelay = typicalDelay
