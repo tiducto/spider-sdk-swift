@@ -13,6 +13,10 @@ public struct Leg: Codable, Sendable {
     public let distance: Double
     /// Seconds.
     public let duration: Int
+    /// How the rider boards the leg's trip at `from`. `SCHEDULED` on a walk leg and on a leg with `interlineWithPreviousLeg`, where the rider is already on board.
+    public let pickupType: PickupDropoffType
+    /// How the rider alights from the leg's trip at `to`. `SCHEDULED` on a walk leg and on a leg the next leg continues with `interlineWithPreviousLeg`, where the rider stays on board.
+    public let dropoffType: PickupDropoffType
     /// True on a transit leg ridden in the same vehicle as the previous leg: the vehicle carries on as another trip, often under another line number, and the rider stays on board. That change is not counted in `numberOfTransfers`. False on every other leg.
     public let interlineWithPreviousLeg: Bool
     public let legGeometry: Geometry
@@ -37,6 +41,8 @@ public struct Leg: Codable, Sendable {
         to: Place,
         distance: Double,
         duration: Int,
+        pickupType: PickupDropoffType,
+        dropoffType: PickupDropoffType,
         interlineWithPreviousLeg: Bool,
         legGeometry: Geometry,
         typicalArrivalDelay: Int? = nil,
@@ -54,6 +60,8 @@ public struct Leg: Codable, Sendable {
         self.to = to
         self.distance = distance
         self.duration = duration
+        self.pickupType = pickupType
+        self.dropoffType = dropoffType
         self.interlineWithPreviousLeg = interlineWithPreviousLeg
         self.legGeometry = legGeometry
         self.typicalArrivalDelay = typicalArrivalDelay

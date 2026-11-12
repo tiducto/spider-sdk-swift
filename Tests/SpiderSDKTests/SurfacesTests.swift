@@ -310,6 +310,9 @@ final class EnumsAndPolylineTests: XCTestCase {
         XCTAssertNil(OccupancyStatus.fromWire("NO_DATA_AVAILABLE"))
         XCTAssertEqual(OccupancyStatus.fromWire("WEIRD"), .unknown)
         XCTAssertEqual(RealtimeState.fromWire("WEIRD"), .unknown)
+        XCTAssertEqual(PickupDropoffType.fromWire("NONE"), .notPossible)
+        XCTAssertEqual(PickupDropoffType.fromWire("COORDINATE_WITH_DRIVER"), .coordinateWithDriver)
+        XCTAssertEqual(PickupDropoffType.fromWire("WEIRD"), .unknown)
         XCTAssertEqual(RoutingErrorCode.fromWire("WEIRD"), .unknown)
         XCTAssertEqual(InputField.fromWire("WEIRD"), .unknown)
         // LOCATION_NOT_FOUND names FROM / TO / VIA; OTP's internal FROM_PLACE is not a wire value.
@@ -335,6 +338,6 @@ final class EnumsAndPolylineTests: XCTestCase {
 
     func testClientExposesContractVersion() {
         let (client, _) = makeClient { _ in json("{}") }
-        XCTAssertEqual(client.contractVersion, "1.8")
+        XCTAssertEqual(client.contractVersion, "1.9")
     }
 }

@@ -17,8 +17,8 @@ final class PlacesTests: XCTestCase {
         XCTAssertNil(req.httpBody)
         XCTAssertEqual(queryItems(req), [URLQueryItem(name: "q", value: "Hlavní nádraží"), URLQueryItem(name: "limit", value: "10")])
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.8.0")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.8")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.9.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.9")
     }
 
     func testSearchNearSendsLatitudeAndLongitude() async throws {
