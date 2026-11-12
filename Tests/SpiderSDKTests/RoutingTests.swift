@@ -13,7 +13,7 @@ final class RoutingTests: XCTestCase {
           "to":{"name":"B","stopPosition":5,"stop":{"gtfsId":"S2","wheelchairBoarding":"NOT_POSSIBLE","platformCode":"B","zoneId":"0"}},
           "mode":"BUS","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","color":"FF0000","textColor":"FFFFFF"},"headsign":"Downtown",
           "realtimeState":"SCHEDULED","realTime":false,"serviceDate":"2026-08-21","distance":1500.0,"duration":900,
-          "trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED"},"typicalArrivalDelay":90,"interlineWithPreviousLeg":true,
+          "trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED"},"typicalArrivalDelay":90,"interlineWithPreviousLeg":true,"pickupType":"COORDINATE_WITH_DRIVER","dropoffType":"CALL_AGENCY",
           "legGeometry":{"points":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI"}
         }]
       }],
@@ -54,6 +54,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(leg.interlineWithPreviousLeg)
         XCTAssertEqual(leg.fromStopPosition, 2)
         XCTAssertEqual(leg.toStopPosition, 5)
+        XCTAssertEqual(leg.pickupType, .coordinateWithDriver)
+        XCTAssertEqual(leg.dropoffType, .callAgency)
         XCTAssertEqual(route.pageInfo, RoutePageInfo(startCursor: "c0", endCursor: "c1", hasNextPage: true, hasPreviousPage: true, searchWindowUsed: "PT60M"))
         XCTAssertEqual(route.searchDateTime, "2026-08-21T10:00:00Z")
 
@@ -61,8 +63,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.path, "/routing/v1/plan")
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.8")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.8.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.9")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.9.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
         let body = req.bodyJSON
         XCTAssertNil(body["id"])
@@ -282,7 +284,7 @@ final class RoutingTests: XCTestCase {
             "start":{"scheduledTime":"2026-08-21T10:00:00Z","estimated":null},"end":{"scheduledTime":"2026-08-21T10:01:00Z","estimated":null},
             "from":{"name":"A","stop":null},"to":{"name":"B","stop":null},"mode":"HOVERCRAFT","realtimeState":"TELEPORTED","realTime":false,
             "typicalArrivalDelay":null,"serviceDate":null,"route":null,"headsign":null,"trip":null,
-            "distance":80.0,"duration":60,"interlineWithPreviousLeg":false,"legGeometry":{"points":""}
+            "distance":80.0,"duration":60,"interlineWithPreviousLeg":false,"pickupType":"BY_DRONE","dropoffType":"SCHEDULED","legGeometry":{"points":""}
           }]}],
           "pageInfo":{"hasNextPage":false,"hasPreviousPage":false,"startCursor":null,"endCursor":null,"searchWindowUsed":null},
           "routingErrors":[
@@ -301,6 +303,8 @@ final class RoutingTests: XCTestCase {
         let leg = route.edges[0].itinerary.legs[0]
         XCTAssertEqual(leg.mode, .unknown)
         XCTAssertEqual(leg.realtimeState, .unknown)
+        XCTAssertEqual(leg.pickupType, .unknown)
+        XCTAssertEqual(leg.dropoffType, .scheduled)
         // A leg with no route or stops (a walk) has no display fields, no typical delay and no interline.
         XCTAssertNil(leg.typicalArrivalDelaySeconds)
         XCTAssertFalse(leg.interlineWithPreviousLeg)
@@ -458,8 +462,8 @@ final class RoutingTests: XCTestCase {
     func testDeparturesMapsEveryRowWithServiceDate() async throws {
         let body = """
         {"stop":{"gtfsId":"S","name":"Main Square","wheelchairBoarding":"POSSIBLE","stoptimesWithoutPatterns":[
-          {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","typicalDelay":45,"stopPosition":7,"headsign":"Airport","stop":{"gtfsId":"S:P2","platformCode":"2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"00A0E0","textColor":"000000"}}},
-          {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36300,"realtimeDeparture":36300,"realtime":false,"realtimeState":"SCHEDULED","typicalDelay":null,"headsign":"main square","stop":{"gtfsId":"S:P1","platformCode":null},"trip":{"gtfsId":"T2","bikesAllowed":"NO_INFORMATION","wheelchairAccessible":"NO_INFORMATION","route":{"gtfsId":"1:R5","shortName":"5","longName":null,"mode":"TRAM","color":null,"textColor":null}}}
+          {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","typicalDelay":45,"stopPosition":7,"pickupType":"COORDINATE_WITH_DRIVER","dropoffType":"NONE","headsign":"Airport","stop":{"gtfsId":"S:P2","platformCode":"2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"00A0E0","textColor":"000000"}}},
+          {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36300,"realtimeDeparture":36300,"realtime":false,"realtimeState":"SCHEDULED","typicalDelay":null,"pickupType":"SCHEDULED","dropoffType":"SCHEDULED","headsign":"main square","stop":{"gtfsId":"S:P1","platformCode":null},"trip":{"gtfsId":"T2","bikesAllowed":"NO_INFORMATION","wheelchairAccessible":"NO_INFORMATION","route":{"gtfsId":"1:R5","shortName":"5","longName":null,"mode":"TRAM","color":null,"textColor":null}}}
         ]}}
         """
         let (client, mock) = makeClient { _ in json(body) }
@@ -493,6 +497,10 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(bare.typicalDelaySeconds)
         XCTAssertEqual(d.stopPosition, 7)
         XCTAssertNil(bare.stopPosition)
+        XCTAssertEqual(d.pickupType, .coordinateWithDriver)
+        XCTAssertEqual(d.dropoffType, .notPossible)
+        XCTAssertEqual(bare.pickupType, .scheduled)
+        XCTAssertEqual(bare.dropoffType, .scheduled)
         XCTAssertEqual(mock.requests[0].path, "/routing/v1/departures")
         XCTAssertEqual(mock.requests[0].bodyJSON["numberOfDepartures"] as? Int, 10)
         XCTAssertNil(mock.requests[0].bodyJSON["reliability"])
@@ -552,8 +560,8 @@ final class RoutingTests: XCTestCase {
     func testTripMapsStopsGeometryAndEnums() async throws {
         let body = """
         {"trip":{"gtfsId":"T1","directionId":"0","tripHeadsign":"Airport","bikesAllowed":"NOT_ALLOWED","wheelchairAccessible":"NOT_POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"FF0000","textColor":"FFFFFF"},"stoptimesForDate":[
-          {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"realtimeState":"UPDATED","typicalDelay":30,"stopPosition":3,"geometryIndex":2,"stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE","platformCode":"1","zoneId":"P"}},
-          {"serviceDay":1700000000,"scheduledArrival":36600,"scheduledDeparture":36600,"realtimeArrival":36600,"realtimeDeparture":36600,"realtime":false,"realtimeState":"SCHEDULED","typicalDelay":null,"stopPosition":5,"stop":{"gtfsId":"S2","name":"B","lat":49.2,"lon":16.62,"wheelchairBoarding":"NO_INFORMATION","platformCode":null,"zoneId":null}}
+          {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"realtimeState":"UPDATED","typicalDelay":30,"stopPosition":3,"geometryIndex":2,"pickupType":"SCHEDULED","dropoffType":"COORDINATE_WITH_DRIVER","stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE","platformCode":"1","zoneId":"P"}},
+          {"serviceDay":1700000000,"scheduledArrival":36600,"scheduledDeparture":36600,"realtimeArrival":36600,"realtimeDeparture":36600,"realtime":false,"realtimeState":"SCHEDULED","typicalDelay":null,"stopPosition":5,"pickupType":null,"dropoffType":null,"stop":{"gtfsId":"S2","name":"B","lat":49.2,"lon":16.62,"wheelchairBoarding":"NO_INFORMATION","platformCode":null,"zoneId":null}}
         ],"tripGeometry":{"points":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI","length":3}}}
         """
         let (client, mock) = makeClient { _ in json(body) }
@@ -584,6 +592,10 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(trip.stops.map(\.stopPosition), [3, 5])
         XCTAssertEqual(trip.geometry[trip.stops[0].geometryIndex!], LatLon(lat: 43.252, lon: -126.453))
         XCTAssertNil(trip.stops[1].geometryIndex)
+        XCTAssertEqual(trip.stops[0].pickupType, .scheduled)
+        XCTAssertEqual(trip.stops[0].dropoffType, .coordinateWithDriver)
+        XCTAssertNil(trip.stops[1].pickupType)
+        XCTAssertNil(trip.stops[1].dropoffType)
     }
 
     func testTripSendsReliabilityOnlyWhenSetAndUnknownTripIsNotFound() async throws {
@@ -609,7 +621,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.httpMethod, "GET")
         XCTAssertEqual(req.url?.absoluteString, "https://env.api.example.com/routing/v1/estimated-delays?tripId=1:T%201&serviceDate=2026-08-21&stopPosition=3")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.8")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.9")
         XCTAssertNotNil(req.value(forHTTPHeaderField: "x-spider-sdk"))
         XCTAssertNil(req.value(forHTTPHeaderField: "if-none-match"))
     }

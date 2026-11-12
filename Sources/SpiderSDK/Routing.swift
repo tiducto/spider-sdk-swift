@@ -64,6 +64,11 @@ public struct Leg: Sendable, Equatable {
     /// `tripGtfsId` and `serviceDate` with the same `TripStop.stopPosition` is that stop. Nil on a walk leg.
     public let fromStopPosition: Int?
     public let toStopPosition: Int?
+    /// How the rider boards at the leg's boarding stop and alights at its alighting stop: `.coordinateWithDriver`
+    /// is a stop on request. `.scheduled` on a walk leg, and at the end of a leg where the rider stays on board
+    /// (`interlineWithPreviousLeg`).
+    public let pickupType: PickupDropoffType
+    public let dropoffType: PickupDropoffType
 }
 
 /// A full origin-to-destination itinerary.
@@ -146,6 +151,10 @@ public struct Departure: Sendable, Equatable {
     public let wheelchairAccessible: WheelchairBoarding?
     /// The departure's position in its trip, as the trip's `TripStop.stopPosition`.
     public let stopPosition: Int?
+    /// How a rider boards and alights here: `.coordinateWithDriver` is a stop on request. `pickupType` is never
+    /// `.notPossible`: a departure nobody can board is left out.
+    public let pickupType: PickupDropoffType
+    public let dropoffType: PickupDropoffType
 }
 
 /// One stop on a trip's timetable.
@@ -174,6 +183,10 @@ public struct TripStop: Sendable, Equatable {
     /// The index into `TripDetails.geometry` of where the stop sits on the trip's line. Nil when the trip has no
     /// geometry or the stop has no point on it.
     public let geometryIndex: Int?
+    /// How a rider boards and alights here: `.coordinateWithDriver` is a stop on request. Nil when the stop is
+    /// canceled: the trip is canceled or realtime skips the stop.
+    public let pickupType: PickupDropoffType?
+    public let dropoffType: PickupDropoffType?
 }
 
 /// The per-level delay history at one stop of one trip run, in seconds. History only: live realtime never changes
@@ -726,7 +739,9 @@ private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
         toWheelchair: WheelchairBoarding.fromWire(w.to.stop?.wheelchairBoarding.rawValue),
         geometry: decodePolyline(w.legGeometry.points),
         fromStopPosition: w.from.stopPosition,
-        toStopPosition: w.to.stopPosition
+        toStopPosition: w.to.stopPosition,
+        pickupType: PickupDropoffType.fromWire(w.pickupType.rawValue),
+        dropoffType: PickupDropoffType.fromWire(w.dropoffType.rawValue)
     )
 }
 
@@ -787,7 +802,9 @@ private func mapDepartures(_ stop: DepartureBoard) -> [Departure] {
             stopGtfsId: st.stop.gtfsId,
             platformCode: st.stop.platformCode,
             wheelchairAccessible: WheelchairBoarding.fromWire(st.trip.wheelchairAccessible.rawValue),
-            stopPosition: st.stopPosition
+            stopPosition: st.stopPosition,
+            pickupType: PickupDropoffType.fromWire(st.pickupType.rawValue),
+            dropoffType: PickupDropoffType.fromWire(st.dropoffType.rawValue)
         )
     }
 }
@@ -811,7 +828,9 @@ private func mapTrip(_ w: TripTimetable, serviceDate: String) -> TripDetails {
             platformCode: s.platformCode,
             zoneId: s.zoneId,
             stopPosition: st.stopPosition,
-            geometryIndex: st.geometryIndex
+            geometryIndex: st.geometryIndex,
+            pickupType: st.pickupType.map { PickupDropoffType.fromWire($0.rawValue) },
+            dropoffType: st.dropoffType.map { PickupDropoffType.fromWire($0.rawValue) }
         )
     }
     return TripDetails(

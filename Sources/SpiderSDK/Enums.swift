@@ -61,6 +61,24 @@ public enum BikesAllowed: String, Sendable, CaseIterable {
     }
 }
 
+/// Whether and how a rider boards (`pickupType`) or alights (`dropoffType`) at a stop, from GTFS `pickup_type` /
+/// `drop_off_type`. Unrecognized values map to `.unknown`.
+public enum PickupDropoffType: String, Sendable, CaseIterable {
+    /// Regularly, as timetabled.
+    case scheduled = "SCHEDULED"
+    /// Not at all.
+    case notPossible = "NONE"
+    /// Only after phoning the agency.
+    case callAgency = "CALL_AGENCY"
+    /// Only by arranging it with the driver: a stop on request.
+    case coordinateWithDriver = "COORDINATE_WITH_DRIVER"
+    case unknown = "UNKNOWN"
+
+    static func fromWire(_ raw: String) -> PickupDropoffType {
+        PickupDropoffType(rawValue: raw) ?? .unknown
+    }
+}
+
 /// GTFS-RT vehicle occupancy. Unrecognized values map to `.unknown`; `NO_DATA_AVAILABLE` maps to nil.
 public enum OccupancyStatus: String, Sendable, CaseIterable {
     case empty = "EMPTY"
