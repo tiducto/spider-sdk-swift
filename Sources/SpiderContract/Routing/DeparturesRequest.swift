@@ -10,18 +10,22 @@ public struct DeparturesRequest: Codable, Sendable {
     public let startTime: Int?
     /// The level `typicalDelay` is given at; the times do not depend on it. Omitted or null, `typicalDelay` is null. A value outside `Reliability` is a 400 `reliability is invalid`.
     public let reliability: Reliability?
+    /// Modes the board leaves out: a departure whose route's `mode` is listed gives no row. They are left out before `numberOfDepartures` counts, so the board holds up to `numberOfDepartures` rows of the other modes within `timeRange`. Absent or empty leaves out nothing. A value outside `TransitMode` is a 400 `excludeModes is invalid`.
+    public let excludeModes: [TransitMode]?
 
     public init(
         id: String,
         numberOfDepartures: Int,
         timeRange: Int,
         startTime: Int? = nil,
-        reliability: Reliability? = nil
+        reliability: Reliability? = nil,
+        excludeModes: [TransitMode]? = nil
     ) {
         self.id = id
         self.numberOfDepartures = numberOfDepartures
         self.timeRange = timeRange
         self.startTime = startTime
         self.reliability = reliability
+        self.excludeModes = excludeModes
     }
 }
