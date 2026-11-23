@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.10.0
+
+Targets Spider API contract 1.10.
+
+### Added
+
+- **`departures(_:…, excludedModes:)`**: leaves out every departure whose `mode` is listed, sent as `excludeModes`.
+  The API drops them before it counts `numberOfDepartures`, so the board still holds up to `numberOfDepartures`
+  departures of the other modes, and so does each later board paged by `startTime`. Empty leaves out nothing;
+  `.walk` and `.unknown` aren't transit modes and are ignored.
+- **`PlanOptions.excludedTransitModes`**: the modes no itinerary may ride, sent as `modes.transit.exclude` by
+  `plan`, `planStream`, `planStreamNext` and `planStreamPrevious`; `planNext` / `planPrevious` resend it. Every
+  other mode stays usable, including one the API adds later. Empty is no filter, and `.walk` and `.unknown` are
+  ignored, as in `allowedTransitModes`. It's an alternative to `allowedTransitModes`: both non-empty fails as
+  `.badRequest` with field `modes.transit` (`modes.transit is invalid`) without a request, the field and wording
+  the API uses.
+
 ## 1.9.0
 
 Targets Spider API contract 1.9.

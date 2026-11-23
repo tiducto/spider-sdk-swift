@@ -63,8 +63,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.path, "/routing/v1/plan")
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.9")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.9.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.10")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.10.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
         let body = req.bodyJSON
         XCTAssertNil(body["id"])
@@ -217,6 +217,65 @@ final class RoutingTests: XCTestCase {
             XCTAssertEqual(error.message, "via is invalid")
             XCTAssertNil(error.httpStatus)
         }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
+
+    // Excluded modes go out as modes.transit.exclude, WALK and UNKNOWN dropped like the allow-list's.
+    func testPlanSendsExcludedTransitModes() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"),
+            destination: .stop("S2"),
+            departAt: Date(timeIntervalSince1970: 1_791_612_000),
+            excludedTransitModes: [.tram, .walk, .unknown, .rail]
+        ))
+        let expected: [String: Any] = [
+            "dateTime": ["earliestDeparture": "2026-10-10T06:00:00Z"],
+            "origin": ["location": ["stopLocation": ["stopLocationId": "S1"]]],
+            "destination": ["location": ["stopLocation": ["stopLocationId": "S2"]]],
+            "modes": ["transit": ["exclude": ["TRAM", "RAIL"]]],
+            "searchWindow": "PT60M",
+        ]
+        XCTAssertEqual(mock.requests[0].bodyJSON as NSDictionary, expected as NSDictionary)
+    }
+
+    // Empty, or only modes that drop out, is no filter: `modes` is omitted. An allow-list of only WALK drops out
+    // too, so it doesn't clash with an exclusion.
+    func testPlanExcludedTransitModesWithoutWireModesAreNoFilter() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        _ = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: []))
+        _ = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: [.walk, .unknown]))
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: [.walk], excludedTransitModes: [.tram]
+        ))
+        XCTAssertEqual(mock.requests.count, 3)
+        XCTAssertNil(mock.requests[0].bodyJSON["modes"])
+        XCTAssertNil(mock.requests[1].bodyJSON["modes"])
+        XCTAssertEqual(mock.requests[2].bodyJSON["modes"] as? NSDictionary, ["transit": ["exclude": ["TRAM"]]] as NSDictionary)
+    }
+
+    func testPlanKeepsExcludedTransitModesWhenPaging() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let result = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: [.bus]))
+        guard case .success(let route) = result else { return XCTFail("expected success") }
+        _ = try await client.routing.planNext(route)
+        _ = try await client.routing.planPrevious(route)
+        XCTAssertEqual(mock.requests.count, 3)
+        for request in mock.requests {
+            XCTAssertEqual(request.bodyJSON["modes"] as? NSDictionary, ["transit": ["exclude": ["BUS"]]] as NSDictionary)
+        }
+    }
+
+    func testPlanRejectsAllowedAndExcludedModesWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let result = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: [.bus], excludedTransitModes: [.tram]
+        ))
+        guard case .failure(let error) = result else { return XCTFail("expected failure") }
+        XCTAssertEqual(error.code, .badRequest)
+        XCTAssertEqual(error.field, "modes.transit")
+        XCTAssertEqual(error.message, "modes.transit is invalid")
+        XCTAssertNil(error.httpStatus)
         XCTAssertTrue(mock.requests.isEmpty)
     }
 
@@ -512,6 +571,20 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(mock.requests[0].bodyJSON["reliability"] as? String, "VERY_SAFE")
     }
 
+    // excludeModes goes out only when a real transit mode is excluded; WALK and UNKNOWN drop out.
+    func testDeparturesSendsExcludedModes() async throws {
+        let (client, mock) = makeClient { _ in json(#"{"stop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[]}}"#) }
+        _ = try await client.routing.departures("S", excludedModes: [.tram, .walk, .unknown, .bus])
+        XCTAssertEqual(
+            mock.requests[0].bodyJSON as NSDictionary,
+            ["id": "S", "numberOfDepartures": 30, "timeRange": 86_400, "excludeModes": ["TRAM", "BUS"]] as NSDictionary
+        )
+        _ = try await client.routing.departures("S", excludedModes: [])
+        _ = try await client.routing.departures("S", excludedModes: [.walk, .unknown])
+        XCTAssertNil(mock.requests[1].bodyJSON["excludeModes"])
+        XCTAssertNil(mock.requests[2].bodyJSON["excludeModes"])
+    }
+
     // Both limited inputs are required on the wire, so the SDK always sends them: 30 departures within 24 h.
     func testDeparturesAlwaysSendsCountAndTimeRange() async throws {
         let (client, mock) = makeClient { _ in json(#"{"stop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[]}}"#) }
@@ -621,7 +694,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.httpMethod, "GET")
         XCTAssertEqual(req.url?.absoluteString, "https://env.api.example.com/routing/v1/estimated-delays?tripId=1:T%201&serviceDate=2026-08-21&stopPosition=3")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.9")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.10")
         XCTAssertNotNil(req.value(forHTTPHeaderField: "x-spider-sdk"))
         XCTAssertNil(req.value(forHTTPHeaderField: "if-none-match"))
     }
