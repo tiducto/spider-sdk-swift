@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.10.0
+
+Targets Spider API contract 1.10.
+
+### Added
+
+- **`departures(_:…, excludedModes:)`**: leaves out every departure whose `mode` is listed, sent as `excludeModes`.
+  The API drops them before it counts `numberOfDepartures`, so the board still holds up to `numberOfDepartures`
+  departures of the other modes, and so does each later board paged by `startTime`. Empty leaves out nothing;
+  `.walk` and `.unknown` aren't transit modes and are ignored.
+- **`PlanOptions.excludedTransitModes`**: the modes no itinerary may ride, sent as `modes.transit.exclude` by
+  `plan`, `planStream`, `planStreamNext` and `planStreamPrevious`; `planNext` / `planPrevious` resend it. Every
+  other mode stays usable, including one the API adds later. Empty is no filter, and `.walk` and `.unknown` are
+  ignored, as in `allowedTransitModes`. It's an alternative to `allowedTransitModes`: both non-empty fails as
+  `.badRequest` with field `modes.transit` (`modes.transit is invalid`) without a request, the field and wording
+  the API uses.
+- **`LiveVehicle.startTime`**: the start time of the trip run the vehicle is on, as the feed's GTFS-RT `start_time`
+  gives it (`HH:MM:SS`, may exceed `24:00:00`), which tells apart the runs of a frequency-based trip; nil when the
+  feed gives none.
+- **`LiveVehicle.wheelchairAccessible`** (`WheelchairBoarding`, as on routing: `.possible`, `.notPossible`, nil when
+  the feed doesn't say or says `UNKNOWN`), **`airConditioning`**, **`wifi`** and **`cardPayment`**: the features of the
+  vehicle the feed reports for the trip, each nil when the feed doesn't say.
+- **`vehicleForTrip(_:serviceDate:startTime:)`** and **`pollVehicleForTrip(_:serviceDate:startTime:intervalMs:)`**:
+  `startTime` picks the run of a frequency-based trip; nil answers the run with the earliest start time, as before.
+- **`tripUpdates(serviceDate:tripIds:)`** and **`pollTripUpdates(serviceDate:tripIds:intervalMs:)`**, on
+  `GET /realtime/v1/trip-updates`: one `TripUpdate` per trip run, with its `startTime`, the schedule deviation
+  `delays` gave, and the trip modifications (detours) that select it. `TripUpdates.updateFor(tripId:startTime:)`
+  finds a run. **Experimental:** `TripUpdate.modifications` (`TripModification`, `StopSelector`,
+  `ReplacementStop`) follow GTFS-RT trip modifications, which GTFS-RT itself marks experimental; a modification's
+  `shape` is decoded to points.
+- **`trip(_:serviceDate:reliability:startTime:)`** and **`estimatedDelays(_:serviceDate:stopPosition:startTime:)`**:
+  `startTime` picks the run of a frequency-based trip, the value `LiveVehicle.startTime` and `TripUpdate.startTime`
+  carry; nil or empty answers the trip's first run. A malformed non-empty start time (not `H:MM:SS` or `HH:MM:SS`)
+  fails as `.badRequest` (field `startTime`) without a request, here and on `vehicleForTrip`.
+
+### Deprecated
+
+- **`delays(serviceDate:tripIds:)`** and **`pollDelays(serviceDate:tripIds:intervalMs:)`**: `GET
+  /realtime/v1/delays` is deprecated in favour of `GET /realtime/v1/trip-updates`. They keep working unchanged until
+  the endpoint is retired with notice, no earlier than 2027-05-24. Move to `tripUpdates` / `pollTripUpdates`.
+
 ## 1.9.0
 
 Targets Spider API contract 1.9.

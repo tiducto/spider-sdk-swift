@@ -10,9 +10,9 @@ public struct LatLon: Sendable, Equatable {
     }
 }
 
-/// Decodes a Google-encoded polyline (precision 1e6) into points. Truncation-tolerant: a string that ends
-/// mid-group returns the points decoded so far rather than throwing.
-func decodePolyline(_ encoded: String) -> [LatLon] {
+/// Decodes a Google-encoded polyline (precision 1e6 unless given) into points. Truncation-tolerant: a string that
+/// ends mid-group returns the points decoded so far rather than throwing.
+func decodePolyline(_ encoded: String, precision: Double = 1e6) -> [LatLon] {
     let chars = Array(encoded.unicodeScalars)
     let count = chars.count
     var points: [LatLon] = []
@@ -39,7 +39,7 @@ func decodePolyline(_ encoded: String) -> [LatLon] {
         lat += dLat
         guard let dLon = nextDelta() else { break }
         lon += dLon
-        points.append(LatLon(lat: Double(lat) / 1e6, lon: Double(lon) / 1e6))
+        points.append(LatLon(lat: Double(lat) / precision, lon: Double(lon) / precision))
     }
     return points
 }

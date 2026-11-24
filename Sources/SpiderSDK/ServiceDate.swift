@@ -18,3 +18,11 @@ func isServiceDate(_ value: String) -> Bool {
           let day = Int(value.suffix(2)) else { return false }
     return DateComponents(year: year, month: month, day: day).isValidDate(in: utcCalendar)
 }
+
+func gtfsTimeSeconds(_ value: String) -> Int? {
+    let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+    guard parts.count == 3, (1...2).contains(parts[0].count), parts[1].count == 2, parts[2].count == 2,
+          parts.allSatisfy({ $0.utf8.allSatisfy { $0 >= UInt8(ascii: "0") && $0 <= UInt8(ascii: "9") } }),
+          let h = Int(parts[0]), let m = Int(parts[1]), let s = Int(parts[2]), m < 60, s < 60 else { return nil }
+    return h * 3600 + m * 60 + s
+}

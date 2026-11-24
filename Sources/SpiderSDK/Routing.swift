@@ -223,7 +223,10 @@ public struct TripDetails: Sendable, Equatable {
 }
 
 /// Options for a trip-plan search. `departAt`/`arriveBy` are mutually exclusive (arriveBy wins if both set;
-/// neither = depart now). `allowedTransitModes` empty = all modes. `searchWindowMinutes` defaults to 60 and may go
+/// neither = depart now). `allowedTransitModes` restricts routing to those modes, and `excludedTransitModes` keeps it
+/// off those modes while every other mode, including one the API adds later, stays usable. Empty means no filter, and
+/// `.walk` and `.unknown` are ignored in either; use one of them, since both non-empty fails as `.badRequest` (field
+/// `modes.transit`) without a request. `planNext`/`planPrevious` resend both. `searchWindowMinutes` defaults to 60 and may go
 /// up to the environment's search-window limit. `maxTransfers` nil = the environment's limit. `reliability` nil =
 /// plan on the timetable alone. The journey must visit or pass through the `via`
 /// locations in the order given; `visit` and `passThrough` entries may be mixed.
@@ -241,6 +244,7 @@ public struct PlanOptions: Sendable {
     public var searchWindowMinutes: Int?
     public var wheelchairAccessible: Bool
     public var reliability: Reliability?
+    public var excludedTransitModes: [TransitMode]
 
     public init(
         origin: Location,
@@ -252,7 +256,8 @@ public struct PlanOptions: Sendable {
         maxTransfers: Int? = nil,
         searchWindowMinutes: Int? = nil,
         wheelchairAccessible: Bool = false,
-        reliability: Reliability? = nil
+        reliability: Reliability? = nil,
+        excludedTransitModes: [TransitMode] = []
     ) {
         self.origin = origin
         self.destination = destination
@@ -264,6 +269,7 @@ public struct PlanOptions: Sendable {
         self.searchWindowMinutes = searchWindowMinutes
         self.wheelchairAccessible = wheelchairAccessible
         self.reliability = reliability
+        self.excludedTransitModes = excludedTransitModes
     }
 }
 
@@ -281,6 +287,7 @@ struct PlanRequest: Sendable, Equatable {
     let searchWindowMinutes: Int
     let wheelchairAccessible: Bool
     let reliability: Reliability?
+    let excludedTransitModes: [TransitMode]
 }
 
 private let DEFAULT_SEARCH_WINDOW_MINUTES = 60
@@ -401,12 +408,18 @@ public final class SpiderRouting {
     /// limit), leaving within `timeRangeSeconds` (above 0, up to 24 h) of `startTime` (nil = now). A
     /// `timeRangeSeconds` outside that range fails as `.badRequest` (field `timeRange`) without a request.
     /// `reliability` is the level `typicalDelaySeconds` is given at; nil leaves it nil.
+    ///
+    /// `excludedModes` leaves out every departure whose `mode` is in it. The API drops them before it counts
+    /// `numberOfDepartures`, so the board still holds up to `numberOfDepartures` departures of the other modes, and
+    /// so does each later board paged by `startTime`. Empty leaves out nothing; `.walk` and `.unknown` aren't
+    /// transit modes and are ignored.
     public func departures(
         _ stopId: String,
         numberOfDepartures: Int = 30,
         startTime: Date? = nil,
         timeRangeSeconds: Int = 86_400,
-        reliability: Reliability? = nil
+        reliability: Reliability? = nil,
+        excludedModes: [TransitMode] = []
     ) async throws -> SpiderResult<[Departure]> {
         guard (1...MAX_TIME_RANGE_SECONDS).contains(timeRangeSeconds) else { return .failure(outOfRange("timeRange")) }
         do {
@@ -415,7 +428,8 @@ public final class SpiderRouting {
                 numberOfDepartures: numberOfDepartures,
                 timeRange: timeRangeSeconds,
                 startTime: startTime.map { Int($0.timeIntervalSince1970.rounded(.down)) },
-                reliability: reliabilityInput(reliability)
+                reliability: reliabilityInput(reliability),
+                excludeModes: wireTransitModes(excludedModes)
             )
             let response: DeparturesResponse = try await transport.postJson("/routing/v1/departures", body)
             guard let stop = response.stop else {
@@ -429,11 +443,23 @@ public final class SpiderRouting {
 
     /// A single trip run's stops, times, and geometry: `tripId` on `serviceDate` (`YYYY-MM-DD`, a `Leg`'s or
     /// `Departure`'s `serviceDate`). `reliability` is the level `typicalDelaySeconds` is given at; nil leaves it nil.
-    /// A malformed date fails as `.badRequest` without a request.
-    public func trip(_ tripId: String, serviceDate: String, reliability: Reliability? = nil) async throws -> SpiderResult<TripDetails> {
+    /// `startTime` picks the run of a frequency-based trip by its start time, a GTFS time `H:MM:SS` or `HH:MM:SS`
+    /// (hours up to 99) compared as a time, the value a realtime `LiveVehicle.startTime` or `TripUpdate.startTime`
+    /// carries; nil or empty answers the trip's first run on `serviceDate`, and a start time no run has is
+    /// `.notFound`. A malformed date or start time fails as `.badRequest` without a request.
+    public func trip(
+        _ tripId: String,
+        serviceDate: String,
+        reliability: Reliability? = nil,
+        startTime: String? = nil
+    ) async throws -> SpiderResult<TripDetails> {
         guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
+        let startTime = startTime.flatMap { $0.isEmpty ? nil : $0 }
+        if let startTime, gtfsTimeSeconds(startTime) == nil { return .failure(invalid("startTime")) }
         do {
-            let body = TripRequest(id: tripId, serviceDate: serviceDate, reliability: reliabilityInput(reliability))
+            let body = TripRequest(
+                id: tripId, serviceDate: serviceDate, startTime: startTime, reliability: reliabilityInput(reliability)
+            )
             let response: TripResponse = try await transport.postJson("/routing/v1/trip", body)
             guard let trip = response.trip else {
                 throw TransportError(.noData, "routing returned no trip for id=\(tripId)")
@@ -446,18 +472,22 @@ public final class SpiderRouting {
 
     /// The delay history at one stop of a trip run: `tripId` on `serviceDate` (`YYYY-MM-DD`, a `Leg`'s or
     /// `Departure`'s `serviceDate`), at `stopPosition` (a `TripStop.stopPosition`). Nil when the trip, the stop
-    /// position or the history is unknown. A malformed date fails as `.badRequest` without a request.
+    /// position or the history is unknown. `startTime` picks the run of a frequency-based trip as in
+    /// `trip(_:serviceDate:reliability:startTime:)`; nil or empty answers the trip's first run, and a start time no
+    /// run has answers nil. A malformed date or start time fails as `.badRequest` without a request.
     public func estimatedDelays(
         _ tripId: String,
         serviceDate: String,
-        stopPosition: Int
+        stopPosition: Int,
+        startTime: String? = nil
     ) async throws -> SpiderResult<EstimatedDelays?> {
         guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
+        let startTime = startTime.flatMap { $0.isEmpty ? nil : $0 }
+        if let startTime, gtfsTimeSeconds(startTime) == nil { return .failure(invalid("startTime")) }
         do {
-            let response: EstimatedDelaysResponse = try await transport.getJson(
-                ESTIMATED_DELAYS_PATH,
-                query: [("tripId", tripId), ("serviceDate", serviceDate), ("stopPosition", String(stopPosition))]
-            )
+            var query = [("tripId", tripId), ("serviceDate", serviceDate), ("stopPosition", String(stopPosition))]
+            if let startTime { query.append(("startTime", startTime)) }
+            let response: EstimatedDelaysResponse = try await transport.getJson(ESTIMATED_DELAYS_PATH, query: query)
             return .success(try response.estimatedDelays.map(mapEstimatedDelays))
         } catch {
             return .failure(toSpiderError(error))
@@ -479,7 +509,8 @@ public final class SpiderRouting {
             maxTransfers: options.maxTransfers,
             searchWindowMinutes: options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
             wheelchairAccessible: options.wheelchairAccessible,
-            reliability: options.reliability
+            reliability: options.reliability,
+            excludedTransitModes: options.excludedTransitModes
         )
     }
 
@@ -498,7 +529,7 @@ public final class SpiderRouting {
             destination: locationToInput(request.destination),
             searchWindow: "PT\(request.searchWindowMinutes)M",
             via: try viaInputs(request.via),
-            modes: modesInput(request.allowedTransitModes),
+            modes: try modesInput(allowed: request.allowedTransitModes, excluded: request.excludedTransitModes),
             preferences: preferencesInput(request),
             before: before,
             after: after,
@@ -537,7 +568,7 @@ public final class SpiderRouting {
             targetResults: targetResults,
             maxWindow: "PT\(maxWindowMinutes)M",
             via: try viaInputs(request.via),
-            modes: modesInput(request.allowedTransitModes),
+            modes: try modesInput(allowed: request.allowedTransitModes, excluded: request.excludedTransitModes),
             preferences: preferencesInput(request),
             before: before,
             after: after,
@@ -662,13 +693,24 @@ private func viaInputs(_ via: [ViaLocation]) throws -> [PlanViaLocationInput]? {
     }
 }
 
-private func modesInput(_ modes: [TransitMode]) -> PlanModesInput? {
-    let transit = modes
+private let MODES_TRANSIT = "modes.transit"
+
+// The API refuses both lists in one request; refuse it here, before the request, with the API's own field.
+private func modesInput(allowed: [TransitMode], excluded: [TransitMode]) throws -> PlanModesInput? {
+    let transit = wireTransitModes(allowed)?.map { PlanTransitModePreferenceInput(mode: $0) }
+    let exclude = wireTransitModes(excluded)
+    if transit != nil && exclude != nil { throw invalid(MODES_TRANSIT) }
+    if transit == nil && exclude == nil { return nil }
+    return PlanModesInput(transit: PlanTransitModesInput(transit: transit, exclude: exclude))
+}
+
+// A filter's wire modes: `.walk`/`.unknown` and the other street/leg modes drop out, and empty (also once they
+// have) is no filter.
+private func wireTransitModes(_ modes: [TransitMode]) -> [SpiderContract.TransitMode]? {
+    let wire = modes
         .filter { WIRE_TRANSIT_MODES.contains($0.rawValue) }
         .compactMap { SpiderContract.TransitMode(rawValue: $0.rawValue) }
-        .map { PlanTransitModePreferenceInput(mode: $0) }
-    guard !transit.isEmpty else { return nil }
-    return PlanModesInput(transit: PlanTransitModesInput(transit: transit))
+    return wire.isEmpty ? nil : wire
 }
 
 private func preferencesInput(_ request: PlanRequest) -> PlanPreferencesInput? {

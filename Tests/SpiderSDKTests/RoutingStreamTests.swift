@@ -160,6 +160,24 @@ final class RoutingStreamTests: XCTestCase {
         }
     }
 
+    // Excluded modes go out as modes.transit.exclude on the initial request and on both continuations, WALK and
+    // UNKNOWN dropped; with only those, `modes` is absent.
+    func testPlanStreamSendsExcludedTransitModes() throws {
+        let (client, _) = makeClient { _ in json("{}") }
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), excludedTransitModes: [.walk, .tram, .unknown])
+        for (after, before) in [(nil, nil), ("c-next", nil), (nil, "c-prev")] as [(String?, String?)] {
+            let body = try client.routing.streamBody(
+                options, targetResults: 5, maxWindowMinutes: 120, after: after, before: before
+            )
+            XCTAssertEqual(try streamBodyJSON(body)["modes"] as? NSDictionary, ["transit": ["exclude": ["TRAM"]]] as NSDictionary)
+        }
+        let walkOnly = try client.routing.streamBody(
+            PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), excludedTransitModes: [.walk, .unknown]),
+            targetResults: 5, maxWindowMinutes: 120, after: nil, before: nil
+        )
+        XCTAssertNil(try streamBodyJSON(walkOnly)["modes"])
+    }
+
     // planStreamNext routes its raw cursor into `after` (and never `before`): the continuation request carries
     // exactly the forward cursor.
     func testPlanStreamNextSendsAfterCursor() throws {
@@ -236,7 +254,7 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "accept"), "text/event-stream")
         XCTAssertEqual(request.value(forHTTPHeaderField: "content-type"), "application/json")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "x-spider-contract-version"), "1.9")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-spider-contract-version"), "1.10")
         let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(StubStreamProtocol.requestBody)) as? [String: Any])
         XCTAssertNil(body["id"])
         XCTAssertNil(body["variables"])
@@ -249,6 +267,22 @@ final class RoutingStreamTests: XCTestCase {
         }
         XCTAssertEqual(done.routingErrors.map(\.code), [.outsideServicePeriod])
         XCTAssertFalse(done.pageInfo.hasNextPage)
+    }
+
+    func testPlanStreamPostsExcludedTransitModesOnEveryCall() async throws {
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), excludedTransitModes: [.rail])
+        let streams: [() -> AsyncStream<PlanStreamEvent>] = [
+            { client.routing.planStream(options, targetResults: 3, maxWindowMinutes: 120) },
+            { client.routing.planStreamNext(options, targetResults: 3, maxWindowMinutes: 120, after: "c-next") },
+            { client.routing.planStreamPrevious(options, targetResults: 3, maxWindowMinutes: 120, before: "c-prev") },
+        ]
+        for stream in streams {
+            StubStreamProtocol.respond(status: 200, body: declinedStream)
+            _ = await collect(stream())
+            let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(StubStreamProtocol.requestBody)) as? [String: Any])
+            XCTAssertEqual(body["modes"] as? NSDictionary, ["transit": ["exclude": ["RAIL"]]] as NSDictionary)
+        }
     }
 
     func testPlanStreamIgnoresUnknownEvents() async throws {
@@ -378,6 +412,7 @@ final class RoutingStreamTests: XCTestCase {
         let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"))
         let viaOptions = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.passThrough(stopIds: [])])
         let coordinateVisit = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.visit(.coordinate(49.2, 16.6))])
+        let bothModes = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), allowedTransitModes: [.bus], excludedTransitModes: [.tram])
         let longVisit = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), via: [.visit(.stop("1:V"), minimumWaitSeconds: 3_601)])
         let cases: [(AsyncStream<PlanStreamEvent>, String, String)] = [
             (client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 119), "maxWindow", "maxWindow is out of range"),
@@ -387,6 +422,9 @@ final class RoutingStreamTests: XCTestCase {
             (client.routing.planStream(longVisit, targetResults: 5, maxWindowMinutes: 120), "via.visit.minimumWaitTime", "via.visit.minimumWaitTime is out of range"),
             (client.routing.planStream(coordinateVisit, targetResults: 5, maxWindowMinutes: 120), "via", "via is invalid"),
             (client.routing.planStreamNext(coordinateVisit, targetResults: 5, maxWindowMinutes: 120, after: "c"), "via", "via is invalid"),
+            (client.routing.planStream(bothModes, targetResults: 5, maxWindowMinutes: 120), "modes.transit", "modes.transit is invalid"),
+            (client.routing.planStreamNext(bothModes, targetResults: 5, maxWindowMinutes: 120, after: "c"), "modes.transit", "modes.transit is invalid"),
+            (client.routing.planStreamPrevious(bothModes, targetResults: 5, maxWindowMinutes: 120, before: "c"), "modes.transit", "modes.transit is invalid"),
         ]
         for (stream, field, message) in cases {
             let events = await collect(stream)
