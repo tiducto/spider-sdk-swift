@@ -11,6 +11,8 @@ public struct TripTimetable: Codable, Sendable {
     public let tripHeadsign: String?
     /// The trip's path; null when the feed has no shapes.
     public let tripGeometry: TripGeometry?
+    /// The vehicle running the trip run answered (the requested `serviceDate`, and `startTime` for a frequency-based trip), as the realtime trip update names it. A Spider extension: OTP 2.10 has no vehicle on a trip. Null until a vehicle is matched to the run. Its `wheelchairAccessible` is the vehicle's realtime access, separate from this trip's `wheelchairAccessible`, which stays the timetable's.
+    public let vehicle: TripVehicle?
 
     public init(
         gtfsId: String,
@@ -20,7 +22,8 @@ public struct TripTimetable: Codable, Sendable {
         stoptimesForDate: [Stoptime],
         directionId: String? = nil,
         tripHeadsign: String? = nil,
-        tripGeometry: TripGeometry? = nil
+        tripGeometry: TripGeometry? = nil,
+        vehicle: TripVehicle? = nil
     ) {
         self.gtfsId = gtfsId
         self.bikesAllowed = bikesAllowed
@@ -30,5 +33,6 @@ public struct TripTimetable: Codable, Sendable {
         self.directionId = directionId
         self.tripHeadsign = tripHeadsign
         self.tripGeometry = tripGeometry
+        self.vehicle = vehicle
     }
 }
