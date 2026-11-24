@@ -30,6 +30,8 @@ public struct Leg: Codable, Sendable {
     public let headsign: String?
     /// Null on a walk leg.
     public let trip: Trip?
+    /// The vehicle running the leg's trip run, as the realtime trip update names it. A Spider extension: OTP 2.10 has no vehicle on a leg. Null on a walk leg and until a vehicle is matched to the run.
+    public let vehicle: TripVehicle?
 
     public init(
         mode: Mode,
@@ -49,7 +51,8 @@ public struct Leg: Codable, Sendable {
         serviceDate: String? = nil,
         route: Route? = nil,
         headsign: String? = nil,
-        trip: Trip? = nil
+        trip: Trip? = nil,
+        vehicle: TripVehicle? = nil
     ) {
         self.mode = mode
         self.start = start
@@ -69,5 +72,6 @@ public struct Leg: Codable, Sendable {
         self.route = route
         self.headsign = headsign
         self.trip = trip
+        self.vehicle = vehicle
     }
 }

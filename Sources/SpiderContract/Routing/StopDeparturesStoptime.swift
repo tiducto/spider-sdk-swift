@@ -23,6 +23,8 @@ public struct StopDeparturesStoptime: Codable, Sendable {
     public let headsign: String?
     /// The position in the trip of this departure, as the trip's `stopPosition`.
     public let stopPosition: Int?
+    /// The vehicle running the departure's trip run, as the realtime trip update names it. A Spider extension: OTP 2.10 has no vehicle on a departure. Null until a vehicle is matched to the run. Its `wheelchairAccessible` is the vehicle's realtime access, separate from `trip.wheelchairAccessible`, which stays the timetable's.
+    public let vehicle: TripVehicle?
 
     public init(
         serviceDay: Int,
@@ -37,7 +39,8 @@ public struct StopDeparturesStoptime: Codable, Sendable {
         trip: StopDeparturesTrip,
         typicalDelay: Int? = nil,
         headsign: String? = nil,
-        stopPosition: Int? = nil
+        stopPosition: Int? = nil,
+        vehicle: TripVehicle? = nil
     ) {
         self.serviceDay = serviceDay
         self.serviceDate = serviceDate
@@ -52,5 +55,6 @@ public struct StopDeparturesStoptime: Codable, Sendable {
         self.typicalDelay = typicalDelay
         self.headsign = headsign
         self.stopPosition = stopPosition
+        self.vehicle = vehicle
     }
 }
