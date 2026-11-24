@@ -57,7 +57,7 @@ Failures are values — every call returns a `SpiderResult<T>` you branch on.
 - **`client.routing`** — trip planning (with paging and a streaming `planStream` / `planStreamNext` / `planStreamPrevious`), departures, and single-trip lookups.
 - **`client.stops`** — text search, geo queries (nearest / bounding box), and lookup by GTFS id.
 - **`client.places`** — one search over stops, addresses, municipalities and points of interest, optionally ranked by distance from a location.
-- **`client.realtime`** — poll-based live vehicle positions, delays, and alerts, plus change-detecting `poll…` streams (no push connections).
+- **`client.realtime`** — poll-based live vehicle positions, trip updates (delays and detours), and alerts, plus change-detecting `poll…` streams (no push connections).
 
 **Full API reference and guides → [docs.tiducto.eu](https://docs.tiducto.eu).** Product overview → [tiducto.eu](https://tiducto.eu).
 

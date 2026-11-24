@@ -11,12 +11,18 @@ extension SpiderRealtime {
         poll(intervalMs: intervalMs) { try await self.vehicles(serviceDate: serviceDate, tripIds: tripIds) }
     }
 
-    /// Polls `vehicleForTrip(_:serviceDate:)`.
-    public func pollVehicleForTrip(_ tripId: String, serviceDate: String, intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<LiveVehicleUpdate>, Error> {
-        poll(intervalMs: intervalMs) { try await self.vehicleForTrip(tripId, serviceDate: serviceDate) }
+    /// Polls `vehicleForTrip(_:serviceDate:startTime:)`.
+    public func pollVehicleForTrip(_ tripId: String, serviceDate: String, startTime: String? = nil, intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<LiveVehicleUpdate>, Error> {
+        poll(intervalMs: intervalMs) { try await self.vehicleForTrip(tripId, serviceDate: serviceDate, startTime: startTime) }
     }
 
-    /// Polls `delays(serviceDate:tripIds:)`.
+    /// Polls `tripUpdates(serviceDate:tripIds:)`.
+    public func pollTripUpdates(serviceDate: String, tripIds: [String], intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<TripUpdates>, Error> {
+        poll(intervalMs: intervalMs) { try await self.tripUpdates(serviceDate: serviceDate, tripIds: tripIds) }
+    }
+
+    /// Polls `delays(serviceDate:tripIds:)`, deprecated with it.
+    @available(*, deprecated, message: "GET /realtime/v1/delays is deprecated (retired no earlier than 2027-05-24); use pollTripUpdates(serviceDate:tripIds:intervalMs:).")
     public func pollDelays(serviceDate: String, tripIds: [String], intervalMs: Int? = nil) -> AsyncThrowingStream<SpiderResult<TripDelays>, Error> {
         poll(intervalMs: intervalMs) { try await self.delays(serviceDate: serviceDate, tripIds: tripIds) }
     }

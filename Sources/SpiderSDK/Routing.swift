@@ -443,11 +443,22 @@ public final class SpiderRouting {
 
     /// A single trip run's stops, times, and geometry: `tripId` on `serviceDate` (`YYYY-MM-DD`, a `Leg`'s or
     /// `Departure`'s `serviceDate`). `reliability` is the level `typicalDelaySeconds` is given at; nil leaves it nil.
-    /// A malformed date fails as `.badRequest` without a request.
-    public func trip(_ tripId: String, serviceDate: String, reliability: Reliability? = nil) async throws -> SpiderResult<TripDetails> {
+    /// `startTime` picks the run of a frequency-based trip by its start time, a GTFS time `H:MM:SS` or `HH:MM:SS`
+    /// (hours up to 99) compared as a time, the value a realtime `LiveVehicle.startTime` or `TripUpdate.startTime`
+    /// carries; nil answers the trip's first run on `serviceDate`, and a start time no run has is `.notFound`.
+    /// A malformed date or start time fails as `.badRequest` without a request.
+    public func trip(
+        _ tripId: String,
+        serviceDate: String,
+        reliability: Reliability? = nil,
+        startTime: String? = nil
+    ) async throws -> SpiderResult<TripDetails> {
         guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
+        if let startTime, gtfsTimeSeconds(startTime) == nil { return .failure(invalid("startTime")) }
         do {
-            let body = TripRequest(id: tripId, serviceDate: serviceDate, reliability: reliabilityInput(reliability))
+            let body = TripRequest(
+                id: tripId, serviceDate: serviceDate, startTime: startTime, reliability: reliabilityInput(reliability)
+            )
             let response: TripResponse = try await transport.postJson("/routing/v1/trip", body)
             guard let trip = response.trip else {
                 throw TransportError(.noData, "routing returned no trip for id=\(tripId)")
@@ -460,18 +471,21 @@ public final class SpiderRouting {
 
     /// The delay history at one stop of a trip run: `tripId` on `serviceDate` (`YYYY-MM-DD`, a `Leg`'s or
     /// `Departure`'s `serviceDate`), at `stopPosition` (a `TripStop.stopPosition`). Nil when the trip, the stop
-    /// position or the history is unknown. A malformed date fails as `.badRequest` without a request.
+    /// position or the history is unknown. `startTime` picks the run of a frequency-based trip as in
+    /// `trip(_:serviceDate:reliability:startTime:)`; nil answers the trip's first run, and a start time no run has
+    /// answers nil. A malformed date or start time fails as `.badRequest` without a request.
     public func estimatedDelays(
         _ tripId: String,
         serviceDate: String,
-        stopPosition: Int
+        stopPosition: Int,
+        startTime: String? = nil
     ) async throws -> SpiderResult<EstimatedDelays?> {
         guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
+        if let startTime, gtfsTimeSeconds(startTime) == nil { return .failure(invalid("startTime")) }
         do {
-            let response: EstimatedDelaysResponse = try await transport.getJson(
-                ESTIMATED_DELAYS_PATH,
-                query: [("tripId", tripId), ("serviceDate", serviceDate), ("stopPosition", String(stopPosition))]
-            )
+            var query = [("tripId", tripId), ("serviceDate", serviceDate), ("stopPosition", String(stopPosition))]
+            if let startTime { query.append(("startTime", startTime)) }
+            let response: EstimatedDelaysResponse = try await transport.getJson(ESTIMATED_DELAYS_PATH, query: query)
             return .success(try response.estimatedDelays.map(mapEstimatedDelays))
         } catch {
             return .failure(toSpiderError(error))

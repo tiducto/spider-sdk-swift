@@ -683,6 +683,47 @@ final class RoutingTests: XCTestCase {
         )
     }
 
+    func testTripSendsStartTimeOnlyWhenSet() async throws {
+        let (client, mock) = makeClient { _ in json(#"{"trip":null}"#) }
+        _ = try await client.routing.trip("1:F1", serviceDate: "2026-08-21", startTime: "8:10:00")
+        XCTAssertEqual(
+            mock.requests[0].bodyJSON as NSDictionary,
+            ["id": "1:F1", "serviceDate": "2026-08-21", "startTime": "8:10:00"] as NSDictionary
+        )
+        _ = try await client.routing.trip("1:F1", serviceDate: "2026-08-21", reliability: .standard, startTime: "25:40:00")
+        XCTAssertEqual(
+            mock.requests[1].bodyJSON as NSDictionary,
+            ["id": "1:F1", "serviceDate": "2026-08-21", "startTime": "25:40:00", "reliability": "STANDARD"] as NSDictionary
+        )
+        _ = try await client.routing.trip("1:F1", serviceDate: "2026-08-21")
+        XCTAssertNil(mock.requests[2].bodyJSON["startTime"])
+    }
+
+    func testTripAndEstimatedDelaysRejectMalformedStartTimeWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        for bad in ["", "7:0:00", "123:00:00", "08:00", "08:00:60"] {
+            for error in [
+                try await client.routing.trip("1:F1", serviceDate: "2026-08-21", startTime: bad).error,
+                try await client.routing.estimatedDelays("1:F1", serviceDate: "2026-08-21", stopPosition: 0, startTime: bad).error,
+            ] {
+                XCTAssertEqual(error?.code, .badRequest, bad)
+                XCTAssertEqual(error?.field, "startTime")
+                XCTAssertEqual(error?.message, "startTime is invalid")
+            }
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
+
+    func testEstimatedDelaysSendsStartTimeOnlyWhenSet() async throws {
+        let (client, mock) = makeClient { _ in json(#"{"estimatedDelays":null}"#) }
+        let result = try await client.routing.estimatedDelays("1:F1", serviceDate: "2026-08-21", stopPosition: 2, startTime: "08:10:00")
+        guard case .success(let delays) = result else { return XCTFail("expected success") }
+        XCTAssertNil(delays)
+        XCTAssertEqual(mock.requests[0].url?.query, "tripId=1:F1&serviceDate=2026-08-21&stopPosition=2&startTime=08:10:00")
+        _ = try await client.routing.estimatedDelays("1:F1", serviceDate: "2026-08-21", stopPosition: 2)
+        XCTAssertEqual(mock.requests[1].url?.query, "tripId=1:F1&serviceDate=2026-08-21&stopPosition=2")
+    }
+
     func testEstimatedDelaysGetsByQueryAndMapsByLevel() async throws {
         // Entries out of order: mapped by `reliability`, not position.
         let body = #"{"estimatedDelays":[{"reliability":"VERY_SAFE","delay":240},{"reliability":"STANDARD","delay":0},{"reliability":"SAFE","delay":90}]}"#

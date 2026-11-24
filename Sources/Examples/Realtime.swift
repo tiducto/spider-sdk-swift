@@ -26,18 +26,18 @@ func setupWithRetry() -> SpiderClient {
     return client
 }
 
-/// A hand-rolled poll loop: fetch delays roughly every 15 seconds until the task is cancelled.
+/// A hand-rolled poll loop: fetch trip updates roughly every 15 seconds until the task is cancelled.
 func poll(client: SpiderClient) async throws {
     // [START poll]
     // One GTFS service date per call — take it from each plan leg's `serviceDate`; ids are feed-prefixed.
     let tripIds = ["1:T-1", "1:T-2"]
     let serviceDate = "2026-01-01"
     while !Task.isCancelled {
-        switch try await client.realtime.delays(serviceDate: serviceDate, tripIds: tripIds) {
-        case .success(let delays):
-            updateBoard(delays)
+        switch try await client.realtime.tripUpdates(serviceDate: serviceDate, tripIds: tripIds) {
+        case .success(let updates):
+            updateBoard(updates)
         case .failure(let error):
-            log("delays failed: \(error.message)")
+            log("trip updates failed: \(error.message)")
         }
         try await Task.sleep(nanoseconds: 15_000_000_000)
     }
@@ -87,14 +87,14 @@ func vehicleForTrip(client: SpiderClient, tripId: String, serviceDate: String) a
 /// Live schedule deviation for a set of trips, printed in minutes.
 func delays(client: SpiderClient) async throws {
     // [START delays]
-    // Delays are per trip instance — pass the GTFS service date (`YYYY-MM-DD`) the trips run on.
-    let result = try await client.realtime.delays(serviceDate: "2026-01-01", tripIds: ["1:T-1", "1:T-2"])
+    // Updates are per trip run — pass the GTFS service date (`YYYY-MM-DD`) the trips run on.
+    let result = try await client.realtime.tripUpdates(serviceDate: "2026-01-01", tripIds: ["1:T-1", "1:T-2"])
     if case .success(let trips) = result {
-        for delay in trips.delays {
-            guard let seconds = delay.delaySeconds else { continue }
+        for update in trips.tripUpdates {
+            guard let seconds = update.delaySeconds else { continue }
             let minutes = seconds / 60
             let sign = minutes >= 0 ? "+" : ""
-            print("\(delay.tripId): \(sign)\(minutes) min")
+            print("\(update.tripId): \(sign)\(minutes) min")
         }
     }
     // [END delays]
@@ -114,6 +114,6 @@ func alerts(client: SpiderClient) async throws {
 
 // MARK: - Illustrative helper stubs (kept private so the example bodies read cleanly).
 
-private func updateBoard(_ delays: TripDelays) { _ = delays }
+private func updateBoard(_ updates: TripUpdates) { _ = updates }
 private func log(_ message: String) { print(message) }
 private func placeMarker(lat: Double, lon: Double) { _ = (lat, lon) }

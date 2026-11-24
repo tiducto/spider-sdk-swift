@@ -176,13 +176,162 @@ final class RealtimeTests: XCTestCase {
         _ = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:T1"])
         _ = try await client.realtime.vehicleForTrip("1:T1", serviceDate: "2026-01-01")
         _ = try await client.realtime.delays(serviceDate: "2026-01-01", tripIds: ["1:T1"])
+        _ = try await client.realtime.tripUpdates(serviceDate: "2026-01-01", tripIds: ["1:T1"])
         _ = try await client.realtime.alerts()
         XCTAssertEqual(mock.requests.map { "\($0.httpMethod ?? "") \($0.path)" }, [
             "GET /realtime/v1/vehicles",
             "GET /realtime/v1/vehicles/by-trip/1:T1",
             "GET /realtime/v1/delays",
+            "GET /realtime/v1/trip-updates",
             "GET /realtime/v1/alerts",
         ])
+    }
+
+    func testVehicleDecodesRunAndFeatures() async throws {
+        let body = """
+        {"vehicles":[{"tripId":"1:F1","serviceDate":"2026-01-01","startTime":"25:10:00","latitude":49.1,"longitude":16.6,"wheelchairAccessible":"WHEELCHAIR_ACCESSIBLE","airConditioning":true,"wifi":false,"cardPayment":true},{"tripId":"1:F2","serviceDate":"2026-01-01","latitude":49.2,"longitude":16.7,"wheelchairAccessible":"SOMETHING_NEW"},{"tripId":"1:F3","serviceDate":"2026-01-01","latitude":49.3,"longitude":16.8,"wheelchairAccessible":"UNKNOWN"}],"missing":[]}
+        """
+        let (client, _) = makeClient { _ in json(body) }
+        let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:F1", "1:F2", "1:F3"])
+        guard case .success(let positions) = result else { return XCTFail("expected success") }
+        let run = positions.vehicles[0]
+        XCTAssertEqual(run.startTime, "25:10:00")
+        XCTAssertEqual(run.wheelchairAccessible, .accessible)
+        XCTAssertEqual(run.airConditioning, true)
+        XCTAssertEqual(run.wifi, false)
+        XCTAssertEqual(run.cardPayment, true)
+        let bare = positions.vehicles[1]
+        XCTAssertNil(bare.startTime)
+        XCTAssertEqual(bare.wheelchairAccessible, .unknown)
+        XCTAssertNil(bare.airConditioning)
+        XCTAssertNil(bare.wifi)
+        XCTAssertNil(bare.cardPayment)
+        XCTAssertEqual(positions.vehicles[2].wheelchairAccessible, .unknown)
+    }
+
+    func testVehicleWithoutFeaturesLeavesThemNil() async throws {
+        let body = #"{"vehicle":{"tripId":"1:T1","serviceDate":"2026-01-01","latitude":49.1,"longitude":16.6}}"#
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let update) = try await client.realtime.vehicleForTrip("1:T1", serviceDate: "2026-01-01"),
+              let vehicle = update.vehicle else { return XCTFail("expected a vehicle") }
+        XCTAssertNil(vehicle.wheelchairAccessible)
+        XCTAssertNil(vehicle.startTime)
+    }
+
+    func testVehicleForTripSendsStartTimeOnlyWhenSet() async throws {
+        let (client, mock) = makeClient { _ in json(#"{"feedTimestamp":1700000000}"#) }
+        _ = try await client.realtime.vehicleForTrip("1:F1", serviceDate: "2026-01-01", startTime: "8:10:00")
+        _ = try await client.realtime.vehicleForTrip("1:F1", serviceDate: "2026-01-01")
+        XCTAssertEqual(mock.requests[0].url?.query, "serviceDate=2026-01-01&startTime=8:10:00")
+        XCTAssertEqual(mock.requests[1].url?.query, "serviceDate=2026-01-01")
+    }
+
+    func testVehicleForTripRejectsMalformedStartTimeWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json("{}") }
+        for bad in ["", "7:0:00", "123:00:00", "08:00", "08:00:60", "08:60:00", "8:1a:00"] {
+            let error = try await client.realtime.vehicleForTrip("1:F1", serviceDate: "2026-01-01", startTime: bad).error
+            XCTAssertEqual(error?.code, .badRequest, bad)
+            XCTAssertEqual(error?.field, "startTime")
+            XCTAssertEqual(error?.message, "startTime is invalid")
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+        _ = try await client.realtime.vehicleForTrip("1:F1", serviceDate: "2026-01-01", startTime: "99:59:59")
+        XCTAssertEqual(mock.requests.count, 1)
+    }
+
+    func testTripUpdatesMapsRunsAndModifications() async throws {
+        let body = """
+        {"serviceDate":"2026-01-01","tripUpdates":[\
+        {"tripId":"1:F1","startTime":"08:10:00","routeId":"1:R1","delaySeconds":120,"scheduleRelationship":"SCHEDULED","stopTimeUpdates":[{"stopId":"1:S1","stopSequence":1,"arrivalDelay":60,"departureDelay":90}]},\
+        {"tripId":"1:F1","startTime":"08:40:00","stopTimeUpdates":[],"modifications":[{"id":"1:M1","startTimes":["08:40:00"],"startStop":{"stopSequence":2},"endStop":{"stopSequence":4,"stopId":"1:S4"},"replacementStops":[{"stopId":"1:RS1","travelTimeToStop":180,"name":"Detour","latitude":49.2,"longitude":16.6},{"stopId":"1:S9"}],"propagatedModificationDelay":240,"alertId":"1:A7","lastModifiedTime":1700000000,"shape":"_p~iF~ps|U_ulLnnqC_mqNvxq`@"}]},\
+        {"tripId":"1:T2","stopTimeUpdates":[]}],\
+        "missing":["1:T3"],"feedTimestamp":1700000000,"staleSeconds":2}
+        """
+        let (client, mock) = makeClient { _ in json(body) }
+        let result = try await client.realtime.tripUpdates(serviceDate: "2026-01-01", tripIds: ["1:T3", "1:F1", "1:T2"])
+        guard case .success(let updates) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(updates.serviceDate, "2026-01-01")
+        XCTAssertEqual(updates.tripUpdates.count, 3)
+        XCTAssertEqual(updates.missing, ["1:T3"])
+        XCTAssertEqual(updates.freshness.feedTimestampEpochMs, 1_700_000_000 * 1000)
+        XCTAssertEqual(updates.freshness.staleSeconds, 2)
+
+        let first = try XCTUnwrap(updates.updateFor(tripId: "1:F1"))
+        XCTAssertEqual(first.startTime, "08:10:00")
+        XCTAssertEqual(first.routeId, "1:R1")
+        XCTAssertEqual(first.delaySeconds, 120)
+        XCTAssertEqual(first.scheduleRelationship, "SCHEDULED")
+        XCTAssertEqual(first.stopTimeUpdates[0].stopSequence, 1)
+        XCTAssertEqual(first.stopTimeUpdates[0].departureDelay, 90)
+        XCTAssertEqual(first.modifications, [])
+
+        let detoured = try XCTUnwrap(updates.updateFor(tripId: "1:F1", startTime: "8:40:00"))
+        XCTAssertEqual(detoured.startTime, "08:40:00")
+        XCTAssertNil(detoured.routeId)
+        XCTAssertNil(detoured.delaySeconds)
+        XCTAssertNil(detoured.scheduleRelationship)
+        XCTAssertEqual(detoured.stopTimeUpdates, [])
+        let modification = try XCTUnwrap(detoured.modifications.first)
+        XCTAssertEqual(modification.id, "1:M1")
+        XCTAssertEqual(modification.startTimes, ["08:40:00"])
+        XCTAssertEqual(modification.startStop, StopSelector(stopSequence: 2, stopId: nil))
+        XCTAssertEqual(modification.endStop, StopSelector(stopSequence: 4, stopId: "1:S4"))
+        XCTAssertEqual(modification.replacementStops, [
+            ReplacementStop(stopId: "1:RS1", travelTimeToStopSeconds: 180, name: "Detour", latitude: 49.2, longitude: 16.6),
+            ReplacementStop(stopId: "1:S9", travelTimeToStopSeconds: nil, name: nil, latitude: nil, longitude: nil),
+        ])
+        XCTAssertEqual(modification.propagatedModificationDelaySeconds, 240)
+        XCTAssertEqual(modification.alertId, "1:A7")
+        XCTAssertEqual(modification.lastModifiedEpochMs, 1_700_000_000 * 1000)
+        let shape = try XCTUnwrap(modification.shape)
+        XCTAssertEqual(shape.count, 3)
+        XCTAssertEqual(shape[0].lat, 38.5, accuracy: 1e-9)
+        XCTAssertEqual(shape[0].lon, -120.2, accuracy: 1e-9)
+        XCTAssertEqual(shape[2].lat, 43.252, accuracy: 1e-9)
+        XCTAssertEqual(shape[2].lon, -126.453, accuracy: 1e-9)
+
+        XCTAssertNil(updates.updateFor(tripId: "1:F1", startTime: "09:10:00"))
+        XCTAssertNil(updates.updateFor(tripId: "1:T2", startTime: "08:10:00"))
+        XCTAssertEqual(updates.updateFor(tripId: "1:T2")?.modifications, [])
+        XCTAssertNil(updates.updateFor(tripId: "1:T3"))
+
+        let req = mock.requests[0]
+        XCTAssertEqual(req.httpMethod, "GET")
+        XCTAssertEqual(req.path, "/realtime/v1/trip-updates")
+        XCTAssertEqual(req.url?.query, "serviceDate=2026-01-01&tripIds=1:F1,1:T2,1:T3")
+    }
+
+    func testTripUpdatesModificationWithoutShapeOrOptionalsDecodes() async throws {
+        let body = #"{"serviceDate":"2026-01-01","tripUpdates":[{"tripId":"1:T1","stopTimeUpdates":[],"modifications":[{"id":"1:M1","replacementStops":[],"propagatedModificationDelay":0}]}],"missing":[]}"#
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let updates) = try await client.realtime.tripUpdates(serviceDate: "2026-01-01", tripIds: ["1:T1"]),
+              let modification = updates.tripUpdates.first?.modifications.first else { return XCTFail("expected a modification") }
+        XCTAssertNil(modification.startTimes)
+        XCTAssertNil(modification.startStop)
+        XCTAssertNil(modification.endStop)
+        XCTAssertNil(modification.shape)
+        XCTAssertNil(modification.alertId)
+        XCTAssertNil(modification.lastModifiedEpochMs)
+        XCTAssertNil(updates.freshness.feedTimestampEpochMs)
+    }
+
+    func testTripUpdatesValidatesLikeDelaysWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json(#"{"serviceDate":"2026-01-01","tripUpdates":[],"missing":[]}"#) }
+        let cases: [(String, [String], String, String)] = [
+            ("20260101", ["1:T1"], "serviceDate", "serviceDate is invalid"),
+            ("2026-01-01", [], "tripIds", "tripIds is required"),
+            ("2026-01-01", ["1:T1", " "], "tripIds", "tripIds is invalid"),
+            ("2026-01-01", (0..<51).map { "1:T\($0)" }, "tripIds", "tripIds is out of range"),
+        ]
+        for (date, ids, field, message) in cases {
+            let error = try await client.realtime.tripUpdates(serviceDate: date, tripIds: ids).error
+            XCTAssertEqual(error?.code, .badRequest)
+            XCTAssertEqual(error?.field, field)
+            XCTAssertEqual(error?.message, message)
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+        _ = try await client.realtime.tripUpdates(serviceDate: "2026-01-01", tripIds: ["1:b", "1:a", "1:b"])
+        XCTAssertEqual(mock.requests[0].url?.query, "serviceDate=2026-01-01&tripIds=1:a,1:b")
     }
 
     func testVehicleForTripSendsServiceDateAndDecodesIt() async throws {
