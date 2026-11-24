@@ -696,12 +696,15 @@ final class RoutingTests: XCTestCase {
             ["id": "1:F1", "serviceDate": "2026-08-21", "startTime": "25:40:00", "reliability": "STANDARD"] as NSDictionary
         )
         _ = try await client.routing.trip("1:F1", serviceDate: "2026-08-21")
+        _ = try await client.routing.trip("1:F1", serviceDate: "2026-08-21", startTime: "")
+        XCTAssertEqual(mock.requests.count, 4)
         XCTAssertNil(mock.requests[2].bodyJSON["startTime"])
+        XCTAssertNil(mock.requests[3].bodyJSON["startTime"])
     }
 
     func testTripAndEstimatedDelaysRejectMalformedStartTimeWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json("{}") }
-        for bad in ["", "7:0:00", "123:00:00", "08:00", "08:00:60"] {
+        for bad in [" ", "7:0:00", "123:00:00", "08:00", "08:00:60"] {
             for error in [
                 try await client.routing.trip("1:F1", serviceDate: "2026-08-21", startTime: bad).error,
                 try await client.routing.estimatedDelays("1:F1", serviceDate: "2026-08-21", stopPosition: 0, startTime: bad).error,
@@ -721,7 +724,9 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(delays)
         XCTAssertEqual(mock.requests[0].url?.query, "tripId=1:F1&serviceDate=2026-08-21&stopPosition=2&startTime=08:10:00")
         _ = try await client.routing.estimatedDelays("1:F1", serviceDate: "2026-08-21", stopPosition: 2)
+        _ = try await client.routing.estimatedDelays("1:F1", serviceDate: "2026-08-21", stopPosition: 2, startTime: "")
         XCTAssertEqual(mock.requests[1].url?.query, "tripId=1:F1&serviceDate=2026-08-21&stopPosition=2")
+        XCTAssertEqual(mock.requests[2].url?.query, "tripId=1:F1&serviceDate=2026-08-21&stopPosition=2")
     }
 
     func testEstimatedDelaysGetsByQueryAndMapsByLevel() async throws {

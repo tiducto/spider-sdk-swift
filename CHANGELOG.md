@@ -19,9 +19,9 @@ Targets Spider API contract 1.10.
 - **`LiveVehicle.startTime`**: the start time of the trip run the vehicle is on, as the feed's GTFS-RT `start_time`
   gives it (`HH:MM:SS`, may exceed `24:00:00`), which tells apart the runs of a frequency-based trip; nil when the
   feed gives none.
-- **`LiveVehicle.wheelchairAccessible`** (`VehicleWheelchairAccessibility`: `.accessible`, `.inaccessible`,
-  `.unknown`), **`airConditioning`**, **`wifi`** and **`cardPayment`**: the features of the vehicle the feed reports
-  for the trip, each nil when the feed doesn't say.
+- **`LiveVehicle.wheelchairAccessible`** (`WheelchairBoarding`, as on routing: `.possible`, `.notPossible`, nil when
+  the feed doesn't say or says `UNKNOWN`), **`airConditioning`**, **`wifi`** and **`cardPayment`**: the features of the
+  vehicle the feed reports for the trip, each nil when the feed doesn't say.
 - **`vehicleForTrip(_:serviceDate:startTime:)`** and **`pollVehicleForTrip(_:serviceDate:startTime:intervalMs:)`**:
   `startTime` picks the run of a frequency-based trip; nil answers the run with the earliest start time, as before.
 - **`tripUpdates(serviceDate:tripIds:)`** and **`pollTripUpdates(serviceDate:tripIds:intervalMs:)`**, on
@@ -32,8 +32,8 @@ Targets Spider API contract 1.10.
   `shape` is decoded to points.
 - **`trip(_:serviceDate:reliability:startTime:)`** and **`estimatedDelays(_:serviceDate:stopPosition:startTime:)`**:
   `startTime` picks the run of a frequency-based trip, the value `LiveVehicle.startTime` and `TripUpdate.startTime`
-  carry; nil answers the trip's first run. A malformed start time (not `H:MM:SS` or `HH:MM:SS`) fails as
-  `.badRequest` (field `startTime`) without a request, here and on `vehicleForTrip`.
+  carry; nil or empty answers the trip's first run. A malformed non-empty start time (not `H:MM:SS` or `HH:MM:SS`)
+  fails as `.badRequest` (field `startTime`) without a request, here and on `vehicleForTrip`.
 
 ### Deprecated
 

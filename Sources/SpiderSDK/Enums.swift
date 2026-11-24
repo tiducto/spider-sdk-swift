@@ -97,19 +97,6 @@ public enum OccupancyStatus: String, Sendable, CaseIterable {
     }
 }
 
-/// Whether the vehicle a realtime feed reports for a trip takes wheelchairs (GTFS-RT
-/// `VehicleDescriptor.WheelchairAccessible`). `.unknown` is the feed's `UNKNOWN`, and also any value added later.
-public enum VehicleWheelchairAccessibility: String, Sendable, CaseIterable {
-    case accessible = "WHEELCHAIR_ACCESSIBLE"
-    case inaccessible = "WHEELCHAIR_INACCESSIBLE"
-    case unknown = "UNKNOWN"
-
-    static func fromWire(_ raw: String?) -> VehicleWheelchairAccessibility? {
-        guard let raw else { return nil }
-        return VehicleWheelchairAccessibility(rawValue: raw) ?? .unknown
-    }
-}
-
 /// The realtime state of a departure/leg. Unrecognized values map to `.unknown`.
 public enum RealtimeState: String, Sendable, CaseIterable {
     case added = "ADDED"

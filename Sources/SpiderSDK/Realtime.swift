@@ -29,8 +29,9 @@ public struct LiveVehicle: Sendable, Equatable {
     public let currentStatus: String?
     public let occupancy: OccupancyStatus?
     public let timestampEpochMs: Int64?
-    /// Whether the vehicle reported for the trip takes wheelchairs. Nil when the feed doesn't say.
-    public let wheelchairAccessible: VehicleWheelchairAccessibility?
+    /// Whether a wheelchair user can ride the vehicle reported for the trip: `.possible` or `.notPossible`, `.unknown`
+    /// for a value added later. Nil when the feed doesn't say or says `UNKNOWN`.
+    public let wheelchairAccessible: WheelchairBoarding?
     /// Whether the vehicle reported for the trip is air-conditioned. Nil when unknown.
     public let airConditioning: Bool?
     /// Whether the vehicle reported for the trip offers Wi-Fi. Nil when unknown.
@@ -245,11 +246,12 @@ public final class SpiderRealtime {
     /// The live vehicle for a single trip run: `tripId` on GTFS `serviceDate` (`YYYY-MM-DD`, a leg's or
     /// departure's `serviceDate`). `startTime` picks the run of a frequency-based trip by the start time the feed
     /// reports it with, a GTFS time `H:MM:SS` or `HH:MM:SS` (hours up to 99) compared as a time; `vehicle` is nil
-    /// when no run has it. Nil answers the run with the earliest start time, so a trip that is not frequency-based
-    /// needs none. A 404 is a normal "no vehicle currently reporting", not an error. A malformed date or start time
-    /// fails as `.badRequest` without a request.
+    /// when no run has it. Nil or empty answers the run with the earliest start time, so a trip that is not
+    /// frequency-based needs none. A 404 is a normal "no vehicle currently reporting", not an error. A malformed date
+    /// or start time fails as `.badRequest` without a request.
     public func vehicleForTrip(_ tripId: String, serviceDate: String, startTime: String? = nil) async throws -> SpiderResult<LiveVehicleUpdate> {
         guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
+        let startTime = startTime.flatMap { $0.isEmpty ? nil : $0 }
         if let startTime, gtfsTimeSeconds(startTime) == nil { return .failure(invalid("startTime")) }
         do {
             let encoded = tripId.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed) ?? tripId
@@ -376,9 +378,18 @@ private func mapVehicle(_ v: VehicleDto) -> LiveVehicle {
         stopId: v.stopId, currentStatus: v.currentStatus,
         occupancy: OccupancyStatus.fromWire(v.occupancyStatus),
         timestampEpochMs: secondsToMs(v.timestamp),
-        wheelchairAccessible: VehicleWheelchairAccessibility.fromWire(v.wheelchairAccessible),
+        wheelchairAccessible: vehicleWheelchair(v.wheelchairAccessible),
         airConditioning: v.airConditioning, wifi: v.wifi, cardPayment: v.cardPayment
     )
+}
+
+private func vehicleWheelchair(_ raw: String?) -> WheelchairBoarding? {
+    switch raw {
+    case nil, "UNKNOWN": return nil
+    case "WHEELCHAIR_ACCESSIBLE": return .possible
+    case "WHEELCHAIR_INACCESSIBLE": return .notPossible
+    default: return .unknown
+    }
 }
 
 private func mapTripUpdate(_ u: TripUpdateDto) -> TripUpdate {

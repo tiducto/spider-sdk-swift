@@ -445,8 +445,8 @@ public final class SpiderRouting {
     /// `Departure`'s `serviceDate`). `reliability` is the level `typicalDelaySeconds` is given at; nil leaves it nil.
     /// `startTime` picks the run of a frequency-based trip by its start time, a GTFS time `H:MM:SS` or `HH:MM:SS`
     /// (hours up to 99) compared as a time, the value a realtime `LiveVehicle.startTime` or `TripUpdate.startTime`
-    /// carries; nil answers the trip's first run on `serviceDate`, and a start time no run has is `.notFound`.
-    /// A malformed date or start time fails as `.badRequest` without a request.
+    /// carries; nil or empty answers the trip's first run on `serviceDate`, and a start time no run has is
+    /// `.notFound`. A malformed date or start time fails as `.badRequest` without a request.
     public func trip(
         _ tripId: String,
         serviceDate: String,
@@ -454,6 +454,7 @@ public final class SpiderRouting {
         startTime: String? = nil
     ) async throws -> SpiderResult<TripDetails> {
         guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
+        let startTime = startTime.flatMap { $0.isEmpty ? nil : $0 }
         if let startTime, gtfsTimeSeconds(startTime) == nil { return .failure(invalid("startTime")) }
         do {
             let body = TripRequest(
@@ -472,8 +473,8 @@ public final class SpiderRouting {
     /// The delay history at one stop of a trip run: `tripId` on `serviceDate` (`YYYY-MM-DD`, a `Leg`'s or
     /// `Departure`'s `serviceDate`), at `stopPosition` (a `TripStop.stopPosition`). Nil when the trip, the stop
     /// position or the history is unknown. `startTime` picks the run of a frequency-based trip as in
-    /// `trip(_:serviceDate:reliability:startTime:)`; nil answers the trip's first run, and a start time no run has
-    /// answers nil. A malformed date or start time fails as `.badRequest` without a request.
+    /// `trip(_:serviceDate:reliability:startTime:)`; nil or empty answers the trip's first run, and a start time no
+    /// run has answers nil. A malformed date or start time fails as `.badRequest` without a request.
     public func estimatedDelays(
         _ tripId: String,
         serviceDate: String,
@@ -481,6 +482,7 @@ public final class SpiderRouting {
         startTime: String? = nil
     ) async throws -> SpiderResult<EstimatedDelays?> {
         guard isServiceDate(serviceDate) else { return .failure(invalid("serviceDate")) }
+        let startTime = startTime.flatMap { $0.isEmpty ? nil : $0 }
         if let startTime, gtfsTimeSeconds(startTime) == nil { return .failure(invalid("startTime")) }
         do {
             var query = [("tripId", tripId), ("serviceDate", serviceDate), ("stopPosition", String(stopPosition))]

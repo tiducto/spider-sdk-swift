@@ -189,14 +189,14 @@ final class RealtimeTests: XCTestCase {
 
     func testVehicleDecodesRunAndFeatures() async throws {
         let body = """
-        {"vehicles":[{"tripId":"1:F1","serviceDate":"2026-01-01","startTime":"25:10:00","latitude":49.1,"longitude":16.6,"wheelchairAccessible":"WHEELCHAIR_ACCESSIBLE","airConditioning":true,"wifi":false,"cardPayment":true},{"tripId":"1:F2","serviceDate":"2026-01-01","latitude":49.2,"longitude":16.7,"wheelchairAccessible":"SOMETHING_NEW"},{"tripId":"1:F3","serviceDate":"2026-01-01","latitude":49.3,"longitude":16.8,"wheelchairAccessible":"UNKNOWN"}],"missing":[]}
+        {"vehicles":[{"tripId":"1:F1","serviceDate":"2026-01-01","startTime":"25:10:00","latitude":49.1,"longitude":16.6,"wheelchairAccessible":"WHEELCHAIR_ACCESSIBLE","airConditioning":true,"wifi":false,"cardPayment":true},{"tripId":"1:F2","serviceDate":"2026-01-01","latitude":49.2,"longitude":16.7,"wheelchairAccessible":"SOMETHING_NEW"},{"tripId":"1:F3","serviceDate":"2026-01-01","latitude":49.3,"longitude":16.8,"wheelchairAccessible":"UNKNOWN"},{"tripId":"1:F4","serviceDate":"2026-01-01","latitude":49.4,"longitude":16.9,"wheelchairAccessible":"WHEELCHAIR_INACCESSIBLE"}],"missing":[]}
         """
         let (client, _) = makeClient { _ in json(body) }
-        let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:F1", "1:F2", "1:F3"])
+        let result = try await client.realtime.vehicles(serviceDate: "2026-01-01", tripIds: ["1:F1", "1:F2", "1:F3", "1:F4"])
         guard case .success(let positions) = result else { return XCTFail("expected success") }
         let run = positions.vehicles[0]
         XCTAssertEqual(run.startTime, "25:10:00")
-        XCTAssertEqual(run.wheelchairAccessible, .accessible)
+        XCTAssertEqual(run.wheelchairAccessible, .possible)
         XCTAssertEqual(run.airConditioning, true)
         XCTAssertEqual(run.wifi, false)
         XCTAssertEqual(run.cardPayment, true)
@@ -206,7 +206,8 @@ final class RealtimeTests: XCTestCase {
         XCTAssertNil(bare.airConditioning)
         XCTAssertNil(bare.wifi)
         XCTAssertNil(bare.cardPayment)
-        XCTAssertEqual(positions.vehicles[2].wheelchairAccessible, .unknown)
+        XCTAssertNil(positions.vehicles[2].wheelchairAccessible)
+        XCTAssertEqual(positions.vehicles[3].wheelchairAccessible, .notPossible)
     }
 
     func testVehicleWithoutFeaturesLeavesThemNil() async throws {
@@ -222,13 +223,15 @@ final class RealtimeTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(#"{"feedTimestamp":1700000000}"#) }
         _ = try await client.realtime.vehicleForTrip("1:F1", serviceDate: "2026-01-01", startTime: "8:10:00")
         _ = try await client.realtime.vehicleForTrip("1:F1", serviceDate: "2026-01-01")
+        _ = try await client.realtime.vehicleForTrip("1:F1", serviceDate: "2026-01-01", startTime: "")
         XCTAssertEqual(mock.requests[0].url?.query, "serviceDate=2026-01-01&startTime=8:10:00")
         XCTAssertEqual(mock.requests[1].url?.query, "serviceDate=2026-01-01")
+        XCTAssertEqual(mock.requests[2].url?.query, "serviceDate=2026-01-01")
     }
 
     func testVehicleForTripRejectsMalformedStartTimeWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json("{}") }
-        for bad in ["", "7:0:00", "123:00:00", "08:00", "08:00:60", "08:60:00", "8:1a:00"] {
+        for bad in [" ", "7:0:00", "123:00:00", "08:00", "08:00:60", "08:60:00", "8:1a:00"] {
             let error = try await client.realtime.vehicleForTrip("1:F1", serviceDate: "2026-01-01", startTime: bad).error
             XCTAssertEqual(error?.code, .badRequest, bad)
             XCTAssertEqual(error?.field, "startTime")
