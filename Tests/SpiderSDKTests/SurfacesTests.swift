@@ -318,6 +318,28 @@ final class RealtimeTests: XCTestCase {
         XCTAssertNil(updates.freshness.feedTimestampEpochMs)
     }
 
+    func testTripUpdatesMapVehiclePresentPartialAndAbsent() async throws {
+        let body = """
+        {"serviceDate":"2026-01-01","tripUpdates":[\
+        {"tripId":"1:T1","stopTimeUpdates":[],"vehicle":{"id":"1:V7","label":"7104","wheelchairAccessible":"WHEELCHAIR_ACCESSIBLE","airConditioning":true,"wifi":false,"cardPayment":true}},\
+        {"tripId":"1:T2","stopTimeUpdates":[],"vehicle":{"label":"12","wheelchairAccessible":"UNKNOWN"}},\
+        {"tripId":"1:T3","stopTimeUpdates":[],"vehicle":{"wheelchairAccessible":"WHEELCHAIR_INACCESSIBLE"}},\
+        {"tripId":"1:T4","stopTimeUpdates":[]}],"missing":[]}
+        """
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let updates) = try await client.realtime.tripUpdates(serviceDate: "2026-01-01", tripIds: ["1:T1", "1:T2", "1:T3", "1:T4"]) else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(updates.updateFor(tripId: "1:T1")?.vehicle, TripVehicle(
+            id: "1:V7", label: "7104", wheelchairAccessible: .possible, airConditioning: true, wifi: false, cardPayment: true
+        ))
+        XCTAssertEqual(updates.updateFor(tripId: "1:T2")?.vehicle, TripVehicle(
+            id: nil, label: "12", wheelchairAccessible: nil, airConditioning: nil, wifi: nil, cardPayment: nil
+        ))
+        XCTAssertEqual(updates.updateFor(tripId: "1:T3")?.vehicle?.wheelchairAccessible, .notPossible)
+        XCTAssertNil(updates.updateFor(tripId: "1:T4")?.vehicle)
+    }
+
     func testTripUpdatesValidatesLikeDelaysWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json(#"{"serviceDate":"2026-01-01","tripUpdates":[],"missing":[]}"#) }
         let cases: [(String, [String], String, String)] = [
@@ -490,6 +512,6 @@ final class EnumsAndPolylineTests: XCTestCase {
 
     func testClientExposesContractVersion() {
         let (client, _) = makeClient { _ in json("{}") }
-        XCTAssertEqual(client.contractVersion, "1.10")
+        XCTAssertEqual(client.contractVersion, "1.11")
     }
 }
