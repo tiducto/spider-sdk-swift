@@ -147,6 +147,8 @@ public struct TripUpdate: Sendable, Equatable {
     /// Experimental: the modifications that apply to this run, in feed order; their delays accumulate along the
     /// trip. Empty when none applies.
     public let modifications: [TripModification]
+    /// The vehicle the feed reports running this trip run. Nil when the update names none.
+    public let vehicle: TripVehicle?
 }
 
 /// Result of `SpiderRealtime.tripUpdates`: the updates of every trip run the feed reported or modified on one GTFS
@@ -397,7 +399,13 @@ private func mapTripUpdate(_ u: TripUpdateDto) -> TripUpdate {
         tripId: u.tripId, startTime: u.startTime, routeId: u.routeId, delaySeconds: u.delaySeconds,
         scheduleRelationship: u.scheduleRelationship,
         stopTimeUpdates: u.stopTimeUpdates.map(mapStopTimeUpdate),
-        modifications: (u.modifications ?? []).map(mapModification)
+        modifications: (u.modifications ?? []).map(mapModification),
+        vehicle: u.vehicle.map {
+            TripVehicle(
+                id: $0.id, label: $0.label, wheelchairAccessible: vehicleWheelchair($0.wheelchairAccessible),
+                airConditioning: $0.airConditioning, wifi: $0.wifi, cardPayment: $0.cardPayment
+            )
+        }
     )
 }
 
@@ -537,6 +545,16 @@ private struct TripUpdateDto: Decodable {
     let scheduleRelationship: String?
     let stopTimeUpdates: [StopTimeUpdateDto]
     let modifications: [TripModificationDto]?
+    let vehicle: TripUpdateVehicleDto?
+}
+
+private struct TripUpdateVehicleDto: Decodable {
+    let id: String?
+    let label: String?
+    let wheelchairAccessible: String?
+    let airConditioning: Bool?
+    let wifi: Bool?
+    let cardPayment: Bool?
 }
 
 private struct TripUpdatesResponse: Decodable {

@@ -63,8 +63,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.path, "/routing/v1/plan")
         XCTAssertEqual(req.httpMethod, "POST")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.10")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.10.0")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.11")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-sdk"), "swift/1.11.0")
         XCTAssertEqual(req.value(forHTTPHeaderField: "content-type"), "application/json")
         let body = req.bodyJSON
         XCTAssertNil(body["id"])
@@ -618,6 +618,65 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(mock.requests.isEmpty)
     }
 
+    func testPlanLegMapsVehicleAndNullVehicle() async throws {
+        let vehicle = #""vehicle":{"id":"1:V7","label":"7104","wheelchairAccessible":"POSSIBLE","airConditioning":true,"wifi":false,"cardPayment":null}"#
+        let unknown = #""vehicle":{"id":null,"label":null,"wheelchairAccessible":"NO_INFORMATION","airConditioning":null,"wifi":null,"cardPayment":null}"#
+        let body = planBody
+            .replacingOccurrences(of: #""pickupType":"COORDINATE_WITH_DRIVER""#, with: vehicle + #","pickupType":"COORDINATE_WITH_DRIVER""#)
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let plan) = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))),
+              let leg = plan.edges.first?.itinerary.legs.first else { return XCTFail("expected a leg") }
+        XCTAssertEqual(leg.vehicle, SpiderSDK.TripVehicle(
+            id: "1:V7", label: "7104", wheelchairAccessible: .possible, airConditioning: true, wifi: false, cardPayment: nil
+        ))
+
+        let unknownBody = planBody
+            .replacingOccurrences(of: #""pickupType":"COORDINATE_WITH_DRIVER""#, with: unknown + #","pickupType":"COORDINATE_WITH_DRIVER""#)
+        let (unknownClient, _) = makeClient { _ in json(unknownBody) }
+        guard case .success(let unknownPlan) = try await unknownClient.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))),
+              let unknownLeg = unknownPlan.edges.first?.itinerary.legs.first else { return XCTFail("expected a leg") }
+        XCTAssertEqual(unknownLeg.vehicle, SpiderSDK.TripVehicle(
+            id: nil, label: nil, wheelchairAccessible: nil, airConditioning: nil, wifi: nil, cardPayment: nil
+        ))
+
+        let nullBody = planBody
+            .replacingOccurrences(of: #""pickupType":"COORDINATE_WITH_DRIVER""#, with: #""vehicle":null,"pickupType":"COORDINATE_WITH_DRIVER""#)
+        let (nullClient, _) = makeClient { _ in json(nullBody) }
+        guard case .success(let nullPlan) = try await nullClient.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))),
+              let nullLeg = nullPlan.edges.first?.itinerary.legs.first else { return XCTFail("expected a leg") }
+        XCTAssertNil(nullLeg.vehicle)
+    }
+
+    func testDeparturesAndTripMapVehicle() async throws {
+        let departures = """
+        {"stop":{"gtfsId":"S","name":"S","stoptimesWithoutPatterns":[
+          {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","pickupType":"SCHEDULED","dropoffType":"SCHEDULED","stop":{"gtfsId":"S:P2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"NO_INFORMATION","route":{"gtfsId":"1:R12","mode":"BUS"}},"vehicle":{"id":"1:V7","label":null,"wheelchairAccessible":"NOT_POSSIBLE","airConditioning":false,"wifi":true,"cardPayment":true}},
+          {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36300,"realtimeDeparture":36300,"realtime":false,"realtimeState":"SCHEDULED","pickupType":"SCHEDULED","dropoffType":"SCHEDULED","stop":{"gtfsId":"S:P1"},"trip":{"gtfsId":"T2","bikesAllowed":"NO_INFORMATION","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R5","mode":"TRAM"}},"vehicle":null}
+        ]}}
+        """
+        let (client, _) = makeClient { _ in json(departures) }
+        guard case .success(let board) = try await client.routing.departures("S") else { return XCTFail("expected success") }
+        XCTAssertEqual(board[0].vehicle, SpiderSDK.TripVehicle(
+            id: "1:V7", label: nil, wheelchairAccessible: .notPossible, airConditioning: false, wifi: true, cardPayment: true
+        ))
+        XCTAssertNil(board[0].wheelchairAccessible)
+        XCTAssertNil(board[1].vehicle)
+
+        let trip = """
+        {"trip":{"gtfsId":"T1","bikesAllowed":"NOT_ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","mode":"BUS"},"stoptimesForDate":[],"vehicle":{"id":"1:V9","label":"9","wheelchairAccessible":"NO_INFORMATION","airConditioning":true,"wifi":null,"cardPayment":false}}}
+        """
+        let (tripClient, _) = makeClient { _ in json(trip) }
+        guard case .success(let details) = try await tripClient.routing.trip("T1", serviceDate: "2026-08-21") else { return XCTFail("expected success") }
+        XCTAssertEqual(details.vehicle, SpiderSDK.TripVehicle(
+            id: "1:V9", label: "9", wheelchairAccessible: nil, airConditioning: true, wifi: nil, cardPayment: false
+        ))
+        XCTAssertEqual(details.wheelchairAccessible, .possible)
+
+        let (nullClient, _) = makeClient { _ in json(trip.replacingOccurrences(of: #""vehicle":{"id":"1:V9","label":"9","wheelchairAccessible":"NO_INFORMATION","airConditioning":true,"wifi":null,"cardPayment":false}"#, with: #""vehicle":null"#)) }
+        guard case .success(let bare) = try await nullClient.routing.trip("T1", serviceDate: "2026-08-21") else { return XCTFail("expected success") }
+        XCTAssertNil(bare.vehicle)
+    }
+
     func testTripRejectsMalformedServiceDateWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json("{}") }
         for bad in ["", "20260921", "2026-09-31", "21-09-2026", "2026-09-21T00:00:00Z"] {
@@ -740,7 +799,7 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(req.httpMethod, "GET")
         XCTAssertEqual(req.url?.absoluteString, "https://env.api.example.com/routing/v1/estimated-delays?tripId=1:T%201&serviceDate=2026-08-21&stopPosition=3")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "secret-key")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.10")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "x-spider-contract-version"), "1.11")
         XCTAssertNotNil(req.value(forHTTPHeaderField: "x-spider-sdk"))
         XCTAssertNil(req.value(forHTTPHeaderField: "if-none-match"))
     }

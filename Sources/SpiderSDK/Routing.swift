@@ -69,6 +69,8 @@ public struct Leg: Sendable, Equatable {
     /// (`interlineWithPreviousLeg`).
     public let pickupType: PickupDropoffType
     public let dropoffType: PickupDropoffType
+    /// The vehicle running the leg's trip run. Nil on a walk leg and until a vehicle is matched to the run.
+    public let vehicle: TripVehicle?
 }
 
 /// A full origin-to-destination itinerary.
@@ -155,6 +157,8 @@ public struct Departure: Sendable, Equatable {
     /// `.notPossible`: a departure nobody can board is left out.
     public let pickupType: PickupDropoffType
     public let dropoffType: PickupDropoffType
+    /// The vehicle running the departure's trip run. Nil until a vehicle is matched to the run.
+    public let vehicle: TripVehicle?
 }
 
 /// One stop on a trip's timetable.
@@ -220,6 +224,9 @@ public struct TripDetails: Sendable, Equatable {
     public let serviceDate: String
     public let stops: [TripStop]
     public let geometry: [LatLon]
+    /// The vehicle running the trip run answered (`serviceDate`, and `startTime` for a frequency-based trip). Nil
+    /// until a vehicle is matched to the run.
+    public let vehicle: TripVehicle?
 }
 
 /// Options for a trip-plan search. `departAt`/`arriveBy` are mutually exclusive (arriveBy wins if both set;
@@ -783,7 +790,19 @@ private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
         fromStopPosition: w.from.stopPosition,
         toStopPosition: w.to.stopPosition,
         pickupType: PickupDropoffType.fromWire(w.pickupType.rawValue),
-        dropoffType: PickupDropoffType.fromWire(w.dropoffType.rawValue)
+        dropoffType: PickupDropoffType.fromWire(w.dropoffType.rawValue),
+        vehicle: w.vehicle.map(mapTripVehicle)
+    )
+}
+
+private func mapTripVehicle(_ w: SpiderContract.TripVehicle) -> TripVehicle {
+    TripVehicle(
+        id: w.id,
+        label: w.label,
+        wheelchairAccessible: WheelchairBoarding.fromWire(w.wheelchairAccessible.rawValue),
+        airConditioning: w.airConditioning,
+        wifi: w.wifi,
+        cardPayment: w.cardPayment
     )
 }
 
@@ -846,7 +865,8 @@ private func mapDepartures(_ stop: DepartureBoard) -> [Departure] {
             wheelchairAccessible: WheelchairBoarding.fromWire(st.trip.wheelchairAccessible.rawValue),
             stopPosition: st.stopPosition,
             pickupType: PickupDropoffType.fromWire(st.pickupType.rawValue),
-            dropoffType: PickupDropoffType.fromWire(st.dropoffType.rawValue)
+            dropoffType: PickupDropoffType.fromWire(st.dropoffType.rawValue),
+            vehicle: st.vehicle.map(mapTripVehicle)
         )
     }
 }
@@ -889,7 +909,8 @@ private func mapTrip(_ w: TripTimetable, serviceDate: String) -> TripDetails {
         wheelchairAccessible: WheelchairBoarding.fromWire(w.wheelchairAccessible.rawValue),
         serviceDate: serviceDate,
         stops: stops,
-        geometry: w.tripGeometry.map { decodePolyline($0.points) } ?? []
+        geometry: w.tripGeometry.map { decodePolyline($0.points) } ?? [],
+        vehicle: w.vehicle.map(mapTripVehicle)
     )
 }
 
