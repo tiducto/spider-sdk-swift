@@ -36,6 +36,10 @@ public struct Leg: Sendable, Equatable {
     /// The fare zone (GTFS `zone_id`) of the boarding / alighting stop, when the feed has one.
     public let fromZoneId: String?
     public let toZoneId: String?
+    /// The station the boarding / alighting stop belongs to (GTFS `parent_station`). Nil when that stop has none,
+    /// and where the leg end is no stop, as for an origin or destination coordinate.
+    public let fromParentStation: ParentStation?
+    public let toParentStation: ParentStation?
     /// Nil on a walk leg.
     public let routeGtfsId: String?
     public let routeShortName: String?
@@ -180,6 +184,8 @@ public struct TripStop: Sendable, Equatable {
     /// The platform (GTFS `platform_code`) and fare zone (GTFS `zone_id`) of the stop, when the feed has them.
     public let platformCode: String?
     public let zoneId: String?
+    /// The station the stop belongs to (GTFS `parent_station`); nil when it has none.
+    public let parentStation: ParentStation?
     /// The stop's position in the trip: increasing along it, not necessarily from 0 or consecutive. A
     /// `Leg.fromStopPosition`, `Leg.toStopPosition` or `Departure.stopPosition` equal to it names this stop, also on
     /// a trip that visits one stop twice. Realtime that adds or removes stops can change it.
@@ -191,6 +197,33 @@ public struct TripStop: Sendable, Equatable {
     /// canceled: the trip is canceled or realtime skips the stop.
     public let pickupType: PickupDropoffType?
     public let dropoffType: PickupDropoffType?
+}
+
+/// The station a stop belongs to (GTFS `parent_station`). Its `gtfsId` is a station id that `Location.stop` in a
+/// plan and `SpiderRouting.departures` accept, for the departures of all the station's stops.
+public struct ParentStation: Sendable, Equatable {
+    public let gtfsId: String
+    public let name: String
+
+    public init(gtfsId: String, name: String) {
+        self.gtfsId = gtfsId
+        self.name = name
+    }
+}
+
+/// The departures `SpiderRouting.stopDepartures` returns, with the stop or station they leave from.
+public struct StopDepartures: Sendable, Equatable {
+    /// The id asked for: a stop's, or a station's for the departures of all its stops.
+    public let gtfsId: String
+    public let name: String
+    /// Whether a rider in a wheelchair can board at the stop. Nil for a station's departures and when there is no
+    /// information.
+    public let wheelchairBoarding: WheelchairBoarding?
+    /// The station the stop belongs to; its `gtfsId` asks for the whole station's departures. Nil for a station's
+    /// departures and for a stop without one.
+    public let parentStation: ParentStation?
+    /// The departures, as `SpiderRouting.departures` returns them.
+    public let departures: [Departure]
 }
 
 /// The per-level delay history at one stop of one trip run, in seconds. History only: live realtime never changes
@@ -307,6 +340,15 @@ public struct PlanOptions: Sendable {
 /// `excludedRoutes` and `excludedAgencies` leave out every trip of those feed-prefixed route or agency ids
 /// (`<feedId>:<id>`; a route id as `Leg.routeGtfsId` and `Departure.routeGtfsId` give it). An id the environment's
 /// feed doesn't know excludes nothing, and empty excludes nothing.
+///
+/// `modeReluctance` is a multiplier on the time spent riding each listed transit mode, from 0.1 to 100000: above 1
+/// avoids the mode, below 1 favours it, and a mode not listed keeps 1. It restricts no mode, and a mode
+/// `PlanOptions.excludedTransitModes` names stays excluded. Without `PlanOptions.allowedTransitModes` it goes out as
+/// `modes.transit.costs`, in `TransitMode` declaration order; with them, each allowed mode carries its own reluctance
+/// and a reluctance for a mode not allowed is dropped. `.walk`, `.unknown` and the other non-transit modes are
+/// ignored, and nil or empty changes no cost. A value outside the range or not finite fails as `.badRequest` (field
+/// `modes.transit.costs.reluctance`, or `modes.transit.transit.cost.reluctance` with an allowed list) without a
+/// request.
 public struct RoutePreferences: Sendable, Equatable {
     public var walkSpeed: Double?
     public var walkReluctance: Double?
@@ -318,6 +360,7 @@ public struct RoutePreferences: Sendable, Equatable {
     public var alightSlackSeconds: Int?
     public var excludedRoutes: [String]
     public var excludedAgencies: [String]
+    public var modeReluctance: [TransitMode: Double]?
 
     public init(
         walkSpeed: Double? = nil,
@@ -329,7 +372,8 @@ public struct RoutePreferences: Sendable, Equatable {
         boardSlackSeconds: Int? = nil,
         alightSlackSeconds: Int? = nil,
         excludedRoutes: [String] = [],
-        excludedAgencies: [String] = []
+        excludedAgencies: [String] = [],
+        modeReluctance: [TransitMode: Double]? = nil
     ) {
         self.walkSpeed = walkSpeed
         self.walkReluctance = walkReluctance
@@ -341,6 +385,7 @@ public struct RoutePreferences: Sendable, Equatable {
         self.alightSlackSeconds = alightSlackSeconds
         self.excludedRoutes = excludedRoutes
         self.excludedAgencies = excludedAgencies
+        self.modeReluctance = modeReluctance
     }
 }
 
@@ -517,6 +562,8 @@ public final class SpiderRouting {
     /// `numberOfDepartures`, so the board still holds up to `numberOfDepartures` departures of the other modes, and
     /// so does each later board paged by `startTime`. Empty leaves out nothing; `.walk` and `.unknown` aren't
     /// transit modes and are ignored.
+    ///
+    /// `stopDepartures` takes the same parameters and also returns the stop or station they leave from.
     public func departures(
         _ stopId: String,
         numberOfDepartures: Int = 30,
@@ -525,6 +572,24 @@ public final class SpiderRouting {
         reliability: Reliability? = nil,
         excludedModes: [TransitMode] = []
     ) async throws -> SpiderResult<[Departure]> {
+        try await stopDepartures(
+            stopId, numberOfDepartures: numberOfDepartures, startTime: startTime, timeRangeSeconds: timeRangeSeconds,
+            reliability: reliability, excludedModes: excludedModes
+        ).map(\.departures)
+    }
+
+    /// The departures `departures` returns, with the stop or station they leave from: its `gtfsId`, `name`,
+    /// `wheelchairBoarding` and `parentStation`, the station a stop belongs to. For a station's id, its departures
+    /// cover all its stops and `wheelchairBoarding` and `parentStation` are nil. The parameters, their limits and the
+    /// failures are those of `departures`, and an id that resolves to no stop or station is `.notFound`.
+    public func stopDepartures(
+        _ stopId: String,
+        numberOfDepartures: Int = 30,
+        startTime: Date? = nil,
+        timeRangeSeconds: Int = 86_400,
+        reliability: Reliability? = nil,
+        excludedModes: [TransitMode] = []
+    ) async throws -> SpiderResult<StopDepartures> {
         guard (1...MAX_TIME_RANGE_SECONDS).contains(timeRangeSeconds) else { return .failure(outOfRange("timeRange")) }
         do {
             let body = DeparturesRequest(
@@ -539,7 +604,7 @@ public final class SpiderRouting {
             guard let stop = response.stop else {
                 throw TransportError(.noData, "routing returned no stop or station for id=\(stopId)")
             }
-            return .success(mapDepartures(stop))
+            return .success(mapStopDepartures(stop))
         } catch {
             return .failure(toSpiderError(error))
         }
@@ -804,12 +869,26 @@ private func viaInputs(_ via: [ViaLocation]) throws -> [PlanViaLocationInput]? {
 
 private let MODES_TRANSIT = "modes.transit"
 
-// The API refuses both lists in one request; refuse it here, before the request, with the API's own field.
+// The API refuses both lists in one request; refuse it here, before the request, with the API's own field. Mode
+// reluctances ride on the allowed modes when there are any, and go out as `costs` otherwise, which the API refuses
+// beside a non-empty `transit`.
 private func modesInput(_ request: PlanRequest) throws -> PlanModesInput? {
-    let transit = wireTransitModes(request.allowedTransitModes)?.map { PlanTransitModePreferenceInput(mode: $0) }
+    let allowed = wireTransitModes(request.allowedTransitModes)
+    let reluctance = try wireModeReluctance(request.preferences?.modeReluctance, allowList: allowed != nil)
+    let transit = allowed?.map { mode in
+        PlanTransitModePreferenceInput(mode: mode, cost: reluctance[mode].map { TransitModePreferenceCostInput(reluctance: $0) })
+    }
     let exclude = wireTransitModes(request.excludedTransitModes)
     if transit != nil && exclude != nil { throw invalid(MODES_TRANSIT) }
-    let transitModes = transit == nil && exclude == nil ? nil : PlanTransitModesInput(transit: transit, exclude: exclude)
+    let costs = transit != nil || reluctance.isEmpty
+        ? nil
+        : TransitMode.allCases.compactMap { mode -> TransitModeCostInput? in
+            guard let wire = SpiderContract.TransitMode(rawValue: mode.rawValue), let value = reluctance[wire] else { return nil }
+            return TransitModeCostInput(mode: wire, reluctance: value)
+        }
+    let transitModes = transit == nil && exclude == nil && costs == nil
+        ? nil
+        : PlanTransitModesInput(transit: transit, exclude: exclude, costs: costs)
     if transitModes == nil && !request.transitOnly { return nil }
     return PlanModesInput(transitOnly: request.transitOnly ? true : nil, transit: transitModes)
 }
@@ -821,6 +900,23 @@ private func wireTransitModes(_ modes: [TransitMode]) -> [SpiderContract.Transit
         .filter { WIRE_TRANSIT_MODES.contains($0.rawValue) }
         .compactMap { SpiderContract.TransitMode(rawValue: $0.rawValue) }
     return wire.isEmpty ? nil : wire
+}
+
+// The reluctances of the transit modes a filter accepts, each checked against the contract's range first.
+private func wireModeReluctance(
+    _ modeReluctance: [TransitMode: Double]?,
+    allowList: Bool
+) throws -> [SpiderContract.TransitMode: Double] {
+    guard let modeReluctance, !modeReluctance.isEmpty else { return [:] }
+    let field = allowList ? "\(MODES_TRANSIT).transit.cost.reluctance" : "\(MODES_TRANSIT).costs.reluctance"
+    var wire: [SpiderContract.TransitMode: Double] = [:]
+    for mode in TransitMode.allCases {
+        guard let value = modeReluctance[mode] else { continue }
+        guard WIRE_TRANSIT_MODES.contains(mode.rawValue), let wireMode = SpiderContract.TransitMode(rawValue: mode.rawValue) else { continue }
+        guard value.isFinite, (MIN_MULTIPLIER...MAX_MULTIPLIER).contains(value) else { throw outOfRange(field) }
+        wire[wireMode] = value
+    }
+    return wire
 }
 
 private func preferencesInput(_ request: PlanRequest) throws -> PlanPreferencesInput? {
@@ -927,6 +1023,8 @@ private func mapLeg(_ w: SpiderContract.Leg) -> Leg {
         toPlatformCode: w.to.stop?.platformCode,
         fromZoneId: w.from.stop?.zoneId,
         toZoneId: w.to.stop?.zoneId,
+        fromParentStation: w.from.stop?.parentStation.map(mapParentStation),
+        toParentStation: w.to.stop?.parentStation.map(mapParentStation),
         routeGtfsId: w.route?.gtfsId,
         routeShortName: w.route?.shortName,
         routeLongName: w.route?.longName,
@@ -997,6 +1095,20 @@ private func mapRoutingError(_ w: SpiderContract.RoutingError) -> RoutingError {
     )
 }
 
+private func mapStopDepartures(_ stop: DepartureBoard) -> StopDepartures {
+    StopDepartures(
+        gtfsId: stop.gtfsId,
+        name: stop.name,
+        wheelchairBoarding: WheelchairBoarding.fromWire(stop.wheelchairBoarding?.rawValue),
+        parentStation: stop.parentStation.map(mapParentStation),
+        departures: mapDepartures(stop)
+    )
+}
+
+private func mapParentStation(_ w: SpiderContract.ParentStation) -> ParentStation {
+    ParentStation(gtfsId: w.gtfsId, name: w.name)
+}
+
 private func mapDepartures(_ stop: DepartureBoard) -> [Departure] {
     stop.stoptimesWithoutPatterns.map { st in
         let route = st.trip.route
@@ -1044,6 +1156,7 @@ private func mapTrip(_ w: TripTimetable, serviceDate: String) -> TripDetails {
             wheelchairBoarding: WheelchairBoarding.fromWire(s.wheelchairBoarding.rawValue),
             platformCode: s.platformCode,
             zoneId: s.zoneId,
+            parentStation: s.parentStation.map(mapParentStation),
             stopPosition: st.stopPosition,
             geometryIndex: st.geometryIndex,
             pickupType: st.pickupType.map { PickupDropoffType.fromWire($0.rawValue) },
