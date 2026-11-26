@@ -440,6 +440,153 @@ final class RoutingTests: XCTestCase {
         }
     }
 
+    // Without an allowed list, mode reluctances go out as modes.transit.costs in TransitMode declaration order,
+    // beside exclude when modes are excluded; non-transit modes drop out.
+    func testPlanSendsModeReluctanceAsCostsAloneAndBesideExclude() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let reluctance: [TransitMode: Double] = [.trolleybus: 0.5, .tram: 2, .bus: 4.5, .walk: 3, .unknown: 3]
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), preferences: RoutePreferences(modeReluctance: reluctance)
+        ))
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: [.rail, .tram],
+            preferences: RoutePreferences(modeReluctance: reluctance)
+        ))
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: [.walk],
+            preferences: RoutePreferences(modeReluctance: [.bus: 2])
+        ))
+        let costs: [[String: Any]] = [
+            ["mode": "BUS", "reluctance": 4.5], ["mode": "TRAM", "reluctance": 2.0], ["mode": "TROLLEYBUS", "reluctance": 0.5],
+        ]
+        XCTAssertEqual(mock.requests[0].bodyJSON["modes"] as? NSDictionary, ["transit": ["costs": costs]] as NSDictionary)
+        XCTAssertEqual(
+            mock.requests[1].bodyJSON["modes"] as? NSDictionary,
+            ["transit": ["exclude": ["RAIL", "TRAM"], "costs": costs]] as NSDictionary
+        )
+        XCTAssertEqual(
+            mock.requests[2].bodyJSON["modes"] as? NSDictionary,
+            ["transit": ["costs": [["mode": "BUS", "reluctance": 2.0]]]] as NSDictionary
+        )
+        XCTAssertNil(mock.requests[0].bodyJSON["preferences"])
+    }
+
+    // With an allowed list, costs never go out: each allowed mode carries its own reluctance, and a reluctance for a
+    // mode not allowed is dropped.
+    func testPlanFoldsModeReluctanceIntoTheAllowedModes() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: [.tram, .bus],
+            preferences: RoutePreferences(modeReluctance: [.bus: 3, .rail: 0.2])
+        ))
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: [.tram],
+            preferences: RoutePreferences(modeReluctance: [.rail: 0.2])
+        ))
+        XCTAssertEqual(
+            mock.requests[0].bodyJSON["modes"] as? NSDictionary,
+            ["transit": ["transit": [["mode": "TRAM"], ["mode": "BUS", "cost": ["reluctance": 3.0]]]]] as NSDictionary
+        )
+        XCTAssertEqual(
+            mock.requests[1].bodyJSON["modes"] as? NSDictionary,
+            ["transit": ["transit": [["mode": "TRAM"]]]] as NSDictionary
+        )
+    }
+
+    func testPlanWithoutOrWithEmptyModeReluctanceSendsNoCosts() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        for reluctance in [nil, [:], [.walk: 2.0, .unknown: 2.0]] as [[TransitMode: Double]?] {
+            _ = try await client.routing.plan(PlanOptions(
+                origin: .stop("S1"), destination: .stop("S2"), preferences: RoutePreferences(modeReluctance: reluctance)
+            ))
+            _ = try await client.routing.plan(PlanOptions(
+                origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: [.tram],
+                preferences: RoutePreferences(modeReluctance: reluctance)
+            ))
+        }
+        XCTAssertEqual(mock.requests.count, 6)
+        for (index, request) in mock.requests.enumerated() {
+            if index.isMultiple(of: 2) {
+                XCTAssertNil(request.bodyJSON["modes"])
+            } else {
+                XCTAssertEqual(request.bodyJSON["modes"] as? NSDictionary, ["transit": ["exclude": ["TRAM"]]] as NSDictionary)
+            }
+            XCTAssertNil(request.bodyJSON["preferences"])
+        }
+    }
+
+    func testPlanRejectsModeReluctanceOutOfRangeWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let cases: [([TransitMode], Double, String)] = [
+            ([], 0.09, "modes.transit.costs.reluctance"),
+            ([], 100_001, "modes.transit.costs.reluctance"),
+            ([], .infinity, "modes.transit.costs.reluctance"),
+            ([], .nan, "modes.transit.costs.reluctance"),
+            ([.bus], 0, "modes.transit.transit.cost.reluctance"),
+            ([.tram], -1, "modes.transit.transit.cost.reluctance"),
+        ]
+        for (allowed, value, field) in cases {
+            let result = try await client.routing.plan(PlanOptions(
+                origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: allowed,
+                preferences: RoutePreferences(modeReluctance: [.bus: value])
+            ))
+            guard case .failure(let error) = result else { return XCTFail("expected failure for \(value)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, field)
+            XCTAssertEqual(error.message, "\(field) is out of range")
+            XCTAssertNil(error.httpStatus)
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+        for value in [0.1, 100_000] {
+            let result = try await client.routing.plan(PlanOptions(
+                origin: .stop("S1"), destination: .stop("S2"), preferences: RoutePreferences(modeReluctance: [.bus: value])
+            ))
+            XCTAssertTrue(result.isSuccess, "\(value)")
+        }
+        XCTAssertEqual(mock.requests.count, 2)
+    }
+
+    func testPlanKeepsModeReluctanceWhenPaging() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let result = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: [.rail],
+            preferences: RoutePreferences(modeReluctance: [.tram: 0.8])
+        ))
+        guard case .success(let route) = result else { return XCTFail("expected success") }
+        _ = try await client.routing.planNext(route)
+        _ = try await client.routing.planPrevious(route)
+        _ = try await client.routing.planNext(route, numberOfItineraries: 2)
+        _ = try await client.routing.planPrevious(route, numberOfItineraries: 2)
+        XCTAssertEqual(mock.requests.count, 5)
+        for request in mock.requests {
+            XCTAssertEqual(
+                request.bodyJSON["modes"] as? NSDictionary,
+                ["transit": ["exclude": ["RAIL"], "costs": [["mode": "TRAM", "reluctance": 0.8]]]] as NSDictionary
+            )
+        }
+    }
+
+    func testPlanLegMapsParentStationsAndNil() async throws {
+        let body = planBody.replacingOccurrences(
+            of: #""zoneId":"P"}"#,
+            with: #""zoneId":"P","parentStation":{"gtfsId":"1:ST1","name":"Main Station"}}"#
+        ).replacingOccurrences(of: #""zoneId":"0"}"#, with: #""zoneId":"0","parentStation":null}"#)
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let plan) = try await client.routing.plan(PlanOptions(origin: .stop("A"), destination: .stop("B"))),
+              let leg = plan.edges.first?.itinerary.legs.first else { return XCTFail("expected a leg") }
+        XCTAssertEqual(leg.fromParentStation, ParentStation(gtfsId: "1:ST1", name: "Main Station"))
+        XCTAssertNil(leg.toParentStation)
+
+        let walk = planBody
+            .replacingOccurrences(of: #""stop":{"gtfsId":"S1","wheelchairBoarding":"POSSIBLE","platformCode":"3","zoneId":"P"}"#, with: #""stop":null"#)
+        let (walkClient, _) = makeClient { _ in json(walk) }
+        guard case .success(let walkPlan) = try await walkClient.routing.plan(PlanOptions(origin: .coordinate(49.19, 16.61), destination: .stop("B"))),
+              let walkLeg = walkPlan.edges.first?.itinerary.legs.first else { return XCTFail("expected a leg") }
+        XCTAssertNil(walkLeg.fromGtfsId)
+        XCTAssertNil(walkLeg.fromParentStation)
+        XCTAssertNil(walkLeg.toParentStation)
+    }
+
     func testPlanNumberOfItinerariesIsFirstOrLastByDirectionAndKeptWhenPaging() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         guard case .success(let sized) = try await client.routing.plan(
@@ -806,6 +953,66 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(mock.requests.isEmpty)
     }
 
+    private let stopDeparturesBody = """
+    {"stop":{"gtfsId":"1:S1","name":"Main Square","wheelchairBoarding":"POSSIBLE","parentStation":{"gtfsId":"1:ST1","name":"Main Square"},"stoptimesWithoutPatterns":[
+      {"serviceDay":1700000000,"serviceDate":"2023-11-14","scheduledDeparture":36000,"realtimeDeparture":36060,"realtime":true,"realtimeState":"UPDATED","pickupType":"SCHEDULED","dropoffType":"SCHEDULED","headsign":"Airport","stop":{"gtfsId":"1:S1","platformCode":"2"},"trip":{"gtfsId":"T1","bikesAllowed":"ALLOWED","wheelchairAccessible":"POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","mode":"BUS"}}}
+    ]}}
+    """
+
+    func testStopDeparturesMapsTheStopAndItsParentStation() async throws {
+        let (client, mock) = makeClient { _ in json(self.stopDeparturesBody) }
+        let result = try await client.routing.stopDepartures("1:S1", numberOfDepartures: 5, reliability: .safe, excludedModes: [.tram])
+        guard case .success(let board) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(board.gtfsId, "1:S1")
+        XCTAssertEqual(board.name, "Main Square")
+        XCTAssertEqual(board.wheelchairBoarding, .possible)
+        XCTAssertEqual(board.parentStation, ParentStation(gtfsId: "1:ST1", name: "Main Square"))
+        XCTAssertEqual(board.departures.map(\.tripGtfsId), ["T1"])
+        XCTAssertEqual(board.departures[0].platformCode, "2")
+        XCTAssertEqual(mock.requests[0].path, "/routing/v1/departures")
+        XCTAssertEqual(
+            mock.requests[0].bodyJSON as NSDictionary,
+            ["id": "1:S1", "numberOfDepartures": 5, "timeRange": 86_400, "reliability": "SAFE", "excludeModes": ["TRAM"]] as NSDictionary
+        )
+    }
+
+    func testStopDeparturesForAStationHasNoParentStation() async throws {
+        let body = """
+        {"stop":{"gtfsId":"1:ST1","name":"Main Square","wheelchairBoarding":null,"parentStation":null,"stoptimesWithoutPatterns":[]}}
+        """
+        let (client, _) = makeClient { _ in json(body) }
+        guard case .success(let board) = try await client.routing.stopDepartures("1:ST1") else { return XCTFail("expected success") }
+        XCTAssertEqual(board.gtfsId, "1:ST1")
+        XCTAssertNil(board.wheelchairBoarding)
+        XCTAssertNil(board.parentStation)
+        XCTAssertTrue(board.departures.isEmpty)
+
+        let (bareClient, _) = makeClient { _ in json(#"{"stop":{"gtfsId":"1:S9","name":"Lone","stoptimesWithoutPatterns":[]}}"#) }
+        guard case .success(let bare) = try await bareClient.routing.stopDepartures("1:S9") else { return XCTFail("expected success") }
+        XCTAssertNil(bare.parentStation)
+        XCTAssertNil(bare.wheelchairBoarding)
+    }
+
+    func testStopDeparturesFailsLikeDepartures() async throws {
+        let (client, mock) = makeClient { _ in json(#"{"stop":null}"#) }
+        let error = try await client.routing.stopDepartures("1:NOPE").error
+        XCTAssertEqual(error?.code, .notFound)
+        XCTAssertNil(error?.httpStatus)
+        let range = try await client.routing.stopDepartures("1:S1", timeRangeSeconds: 0).error
+        XCTAssertEqual(range?.code, .badRequest)
+        XCTAssertEqual(range?.field, "timeRange")
+        XCTAssertEqual(mock.requests.count, 1)
+    }
+
+    func testDeparturesReturnsTheStopDeparturesRows() async throws {
+        let (client, mock) = makeClient { _ in json(self.stopDeparturesBody) }
+        guard case .success(let departures) = try await client.routing.departures("1:S1", numberOfDepartures: 5),
+              case .success(let board) = try await client.routing.stopDepartures("1:S1", numberOfDepartures: 5)
+        else { return XCTFail("expected success") }
+        XCTAssertEqual(departures, board.departures)
+        XCTAssertEqual(mock.requests[0].bodyJSON as NSDictionary, mock.requests[1].bodyJSON as NSDictionary)
+    }
+
     func testPlanLegMapsVehicleAndNullVehicle() async throws {
         let vehicle = #""vehicle":{"id":"1:V7","label":"7104","wheelchairAccessible":"POSSIBLE","airConditioning":true,"wifi":false,"cardPayment":null}"#
         let unknown = #""vehicle":{"id":null,"label":null,"wheelchairAccessible":"NO_INFORMATION","airConditioning":null,"wifi":null,"cardPayment":null}"#
@@ -880,7 +1087,7 @@ final class RoutingTests: XCTestCase {
     func testTripMapsStopsGeometryAndEnums() async throws {
         let body = """
         {"trip":{"gtfsId":"T1","directionId":"0","tripHeadsign":"Airport","bikesAllowed":"NOT_ALLOWED","wheelchairAccessible":"NOT_POSSIBLE","route":{"gtfsId":"1:R12","shortName":"12","longName":"Line 12","mode":"BUS","color":"FF0000","textColor":"FFFFFF"},"stoptimesForDate":[
-          {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"realtimeState":"UPDATED","typicalDelay":30,"stopPosition":3,"geometryIndex":2,"pickupType":"SCHEDULED","dropoffType":"COORDINATE_WITH_DRIVER","stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE","platformCode":"1","zoneId":"P"}},
+          {"serviceDay":1700000000,"scheduledArrival":36000,"scheduledDeparture":36030,"realtimeArrival":36050,"realtimeDeparture":36080,"realtime":true,"realtimeState":"UPDATED","typicalDelay":30,"stopPosition":3,"geometryIndex":2,"pickupType":"SCHEDULED","dropoffType":"COORDINATE_WITH_DRIVER","stop":{"gtfsId":"S1","name":"A","lat":49.19,"lon":16.61,"wheelchairBoarding":"POSSIBLE","platformCode":"1","zoneId":"P","parentStation":{"gtfsId":"1:ST1","name":"A station"}}},
           {"serviceDay":1700000000,"scheduledArrival":36600,"scheduledDeparture":36600,"realtimeArrival":36600,"realtimeDeparture":36600,"realtime":false,"realtimeState":"SCHEDULED","typicalDelay":null,"stopPosition":5,"pickupType":null,"dropoffType":null,"stop":{"gtfsId":"S2","name":"B","lat":49.2,"lon":16.62,"wheelchairBoarding":"NO_INFORMATION","platformCode":null,"zoneId":null}}
         ],"tripGeometry":{"points":"_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI","length":3}}}
         """
@@ -907,6 +1114,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(trip.stops[1].typicalDelaySeconds)
         XCTAssertNil(trip.stops[1].platformCode)
         XCTAssertNil(trip.stops[1].zoneId)
+        XCTAssertEqual(trip.stops[0].parentStation, ParentStation(gtfsId: "1:ST1", name: "A station"))
+        XCTAssertNil(trip.stops[1].parentStation)
         XCTAssertNil(trip.stops[1].wheelchairBoarding)
         XCTAssertEqual(trip.geometry.count, 3)
         XCTAssertEqual(trip.stops.map(\.stopPosition), [3, 5])

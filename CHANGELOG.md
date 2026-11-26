@@ -2,10 +2,30 @@
 
 ## Unreleased
 
-Targets Spider API contract 1.11.
+Targets Spider API contract 1.12.
 
 ### Added
 
+- **`RoutePreferences.modeReluctance`** (`[TransitMode: Double]?`): a multiplier on the time spent riding each listed
+  transit mode, from 0.1 to 100000 (above 1 avoids the mode, below 1 favours it; a mode not listed keeps 1). It
+  restricts no mode, and a mode `excludedTransitModes` names stays excluded. Sent by `plan`, `planStream`,
+  `planStreamNext` and `planStreamPrevious`; `planNext` / `planPrevious` resend it. Without `allowedTransitModes` it
+  goes out as `modes.transit.costs` (beside `exclude` when modes are excluded), in `TransitMode` declaration order;
+  with them, `costs` is never sent: each allowed mode carries its own `modes.transit.transit[].cost.reluctance`, and a
+  reluctance for a mode not allowed is dropped. `.walk`, `.unknown` and the other non-transit modes are ignored, and
+  nil or empty sends nothing. A value outside the range or not finite fails as `.badRequest` (field
+  `modes.transit.costs.reluctance`, or `modes.transit.transit.cost.reluctance` with an allowed list) without a
+  request.
+- **`ParentStation`** (`gtfsId`, `name`): the station a stop belongs to (GTFS `parent_station`); its `gtfsId` is a
+  station id that a plan's `Location.stop` and `departures` accept.
+- **`Leg.fromParentStation`** / **`Leg.toParentStation`**: the station of the leg's boarding / alighting stop, on
+  `plan` and the `planStream` calls alike. Nil when the stop has none and where the leg end is no stop.
+- **`TripStop.parentStation`**: the station of each stop of `trip`; nil when the stop has none.
+- **`stopDepartures(_:numberOfDepartures:startTime:timeRangeSeconds:reliability:excludedModes:)`**: the same call and
+  parameters as `departures`, returning a `StopDepartures` with the stop's or station's `gtfsId`, `name`,
+  `wheelchairBoarding`, `parentStation` and the `departures`. `parentStation` and `wheelchairBoarding` are nil for a
+  station's departures, and `parentStation` for a stop without one. An id that resolves to no stop or station is
+  `.notFound`, as in `departures`, which keeps its signature and result.
 - **`RoutePreferences`** and **`PlanOptions.preferences`**: the contract's routing preferences the SDK didn't
   expose, sent by `plan`, `planStream`, `planStreamNext` and `planStreamPrevious`; `planNext` / `planPrevious` resend
   them. `walkSpeed`, `walkReluctance` and `boardCost` go under `preferences.street.walk`, `transferCost` and
