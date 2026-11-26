@@ -214,11 +214,11 @@ final class RoutingStreamTests: XCTestCase {
         let (client, _) = makeClient { _ in json("{}") }
         let costs = PlanOptions(
             origin: .stop("1:A"), destination: .stop("1:B"), excludedTransitModes: [.rail],
-            preferences: RoutePreferences(modeReluctance: [.tram: 0.5, .bus: 2])
+            preferences: RoutePreferences(modeReluctance: [.tram: 1.5, .bus: 2])
         )
         let allowed = PlanOptions(
             origin: .stop("1:A"), destination: .stop("1:B"), allowedTransitModes: [.bus],
-            preferences: RoutePreferences(modeReluctance: [.tram: 0.5, .bus: 2])
+            preferences: RoutePreferences(modeReluctance: [.tram: 1.5, .bus: 2])
         )
         for (after, before) in [(nil, nil), ("c-next", nil), (nil, "c-prev")] as [(String?, String?)] {
             let costsBody = try streamBodyJSON(client.routing.streamBody(
@@ -226,7 +226,7 @@ final class RoutingStreamTests: XCTestCase {
             ))
             XCTAssertEqual(
                 costsBody["modes"] as? NSDictionary,
-                ["transit": ["exclude": ["RAIL"], "costs": [["mode": "BUS", "reluctance": 2.0], ["mode": "TRAM", "reluctance": 0.5]]]] as NSDictionary
+                ["transit": ["exclude": ["RAIL"], "costs": [["mode": "BUS", "reluctance": 2.0], ["mode": "TRAM", "reluctance": 1.5]]]] as NSDictionary
             )
             XCTAssertNil(costsBody["preferences"])
             let allowedBody = try streamBodyJSON(client.routing.streamBody(
@@ -388,7 +388,7 @@ final class RoutingStreamTests: XCTestCase {
     func testPlanStreamRejectsModeReluctanceOutOfRangeWithoutRequest() async throws {
         StubStreamProtocol.respond(status: 200, body: "")
         let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
-        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), preferences: RoutePreferences(modeReluctance: [.bus: 0.05]))
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), preferences: RoutePreferences(modeReluctance: [.bus: 0.99]))
         for stream in [
             client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120),
             client.routing.planStreamNext(options, targetResults: 5, maxWindowMinutes: 120, after: "c"),
