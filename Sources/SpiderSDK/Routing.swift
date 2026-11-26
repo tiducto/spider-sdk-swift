@@ -240,6 +240,9 @@ public struct TripDetails: Sendable, Equatable {
 /// `wheelchairAccessible` rides only trips the feed marks wheelchair accessible, boards and alights only at stops it
 /// marks accessible (no information counts as not accessible), and walks strongly avoiding steps and ways mapped as
 /// not wheelchair accessible; the feed's accessibility data limits what this guarantees.
+/// `preferences` tunes walking, transfers and boarding and leaves out routes or agencies; nil keeps the environment's
+/// defaults. `transitOnly` leaves out every itinerary without a transit leg, such as walking the whole way, alongside
+/// either mode list. `planNext`/`planPrevious` resend both, and a stream continuation sends them again from its options.
 public struct PlanOptions: Sendable {
     public let origin: Location
     public let destination: Location
@@ -252,6 +255,8 @@ public struct PlanOptions: Sendable {
     public var wheelchairAccessible: Bool
     public var reliability: Reliability?
     public var excludedTransitModes: [TransitMode]
+    public var preferences: RoutePreferences?
+    public var transitOnly: Bool
 
     public init(
         origin: Location,
@@ -264,7 +269,9 @@ public struct PlanOptions: Sendable {
         searchWindowMinutes: Int? = nil,
         wheelchairAccessible: Bool = false,
         reliability: Reliability? = nil,
-        excludedTransitModes: [TransitMode] = []
+        excludedTransitModes: [TransitMode] = [],
+        preferences: RoutePreferences? = nil,
+        transitOnly: Bool = false
     ) {
         self.origin = origin
         self.destination = destination
@@ -277,6 +284,63 @@ public struct PlanOptions: Sendable {
         self.wheelchairAccessible = wheelchairAccessible
         self.reliability = reliability
         self.excludedTransitModes = excludedTransitModes
+        self.preferences = preferences
+        self.transitOnly = transitOnly
+    }
+}
+
+/// Optional routing preferences for `PlanOptions.preferences`. Each member left nil keeps the environment's default,
+/// so `RoutePreferences()` asks for nothing. A value outside its range fails as `.badRequest` for the member's contract
+/// path (such as `preferences.street.walk.speed`) without a request; the API never clamps one. The API rounds the
+/// multipliers and the walking speed to its own steps.
+///
+/// `walkSpeed` is the walking speed on flat ground in metres per second, at least 0.1. `walkReluctance` is how much
+/// worse walking is than riding for the same time, a multiplier from 0.1 to 100000: above the default it walks less.
+/// `boardCost` is a generalized cost added for each boarding and `transferCost` one added for each transfer, each from
+/// 0 to 1000000: higher favours fewer rides. `waitReluctance` is how much worse waiting at a stop is than riding for
+/// the same time, from 0.1 to 100000: above the default it rather walks on than waits.
+///
+/// `transferSlackSeconds` is the least time between alighting one vehicle and boarding the next, on top of the walk
+/// between the stops; `boardSlackSeconds` the least time at the stop before boarding; `alightSlackSeconds` the least
+/// time needed to alight. Each is from 0 to 3600 (1 hour), sent as an ISO-8601 duration.
+///
+/// `excludedRoutes` and `excludedAgencies` leave out every trip of those feed-prefixed route or agency ids
+/// (`<feedId>:<id>`; a route id as `Leg.routeGtfsId` and `Departure.routeGtfsId` give it). An id the environment's
+/// feed doesn't know excludes nothing, and empty excludes nothing.
+public struct RoutePreferences: Sendable, Equatable {
+    public var walkSpeed: Double?
+    public var walkReluctance: Double?
+    public var boardCost: Int?
+    public var transferCost: Int?
+    public var transferSlackSeconds: Int?
+    public var waitReluctance: Double?
+    public var boardSlackSeconds: Int?
+    public var alightSlackSeconds: Int?
+    public var excludedRoutes: [String]
+    public var excludedAgencies: [String]
+
+    public init(
+        walkSpeed: Double? = nil,
+        walkReluctance: Double? = nil,
+        boardCost: Int? = nil,
+        transferCost: Int? = nil,
+        transferSlackSeconds: Int? = nil,
+        waitReluctance: Double? = nil,
+        boardSlackSeconds: Int? = nil,
+        alightSlackSeconds: Int? = nil,
+        excludedRoutes: [String] = [],
+        excludedAgencies: [String] = []
+    ) {
+        self.walkSpeed = walkSpeed
+        self.walkReluctance = walkReluctance
+        self.boardCost = boardCost
+        self.transferCost = transferCost
+        self.transferSlackSeconds = transferSlackSeconds
+        self.waitReluctance = waitReluctance
+        self.boardSlackSeconds = boardSlackSeconds
+        self.alightSlackSeconds = alightSlackSeconds
+        self.excludedRoutes = excludedRoutes
+        self.excludedAgencies = excludedAgencies
     }
 }
 
@@ -295,6 +359,18 @@ struct PlanRequest: Sendable, Equatable {
     let wheelchairAccessible: Bool
     let reliability: Reliability?
     let excludedTransitModes: [TransitMode]
+    let preferences: RoutePreferences?
+    let transitOnly: Bool
+    let numberOfItineraries: Int?
+
+    func sized(_ numberOfItineraries: Int?) -> PlanRequest {
+        PlanRequest(
+            origin: origin, destination: destination, timeKind: timeKind, time: time, via: via,
+            allowedTransitModes: allowedTransitModes, maxTransfers: maxTransfers, searchWindowMinutes: searchWindowMinutes,
+            wheelchairAccessible: wheelchairAccessible, reliability: reliability, excludedTransitModes: excludedTransitModes,
+            preferences: preferences, transitOnly: transitOnly, numberOfItineraries: numberOfItineraries
+        )
+    }
 }
 
 private let DEFAULT_SEARCH_WINDOW_MINUTES = 60
@@ -329,21 +405,40 @@ public final class SpiderRouting {
         self.transport = transport
     }
 
-    /// Plans a trip. Returns the first window of itineraries; a via outside its fixed limits fails without a request.
-    public func plan(_ options: PlanOptions) async throws -> SpiderResult<Route> {
-        try await page(makeRequest(options))
+    /// Plans a trip. Returns the first window of itineraries; a via or a preference outside its fixed limits fails
+    /// without a request. `numberOfItineraries` is how many itineraries the page holds at most, from 1 up to the
+    /// environment's itinerary limit; nil means the limit. The API rejects a value out of range, never clamps it.
+    /// `planNext`/`planPrevious` keep it.
+    public func plan(_ options: PlanOptions, numberOfItineraries: Int? = nil) async throws -> SpiderResult<Route> {
+        try await page(makeRequest(options, numberOfItineraries: numberOfItineraries))
     }
 
-    /// The next window after `route`, or nil if there is none. Pages forward with `after` (no page-size count).
+    /// The next window after `route`, or nil if there is none. Pages forward with `after`, at the page size `route`
+    /// was asked with.
     public func planNext(_ route: Route) async throws -> SpiderResult<Route>? {
         guard route.pageInfo.hasNextPage else { return nil }
         return try await page(route.request, after: route.pageInfo.endCursor)
     }
 
-    /// The previous window before `route`, or nil if there is none. Pages backward with `before` (no page-size count).
+    /// The next window after `route`, or nil if there is none, holding at most `numberOfItineraries` as in `plan`
+    /// (nil = the environment's limit). The pages after this one keep it.
+    public func planNext(_ route: Route, numberOfItineraries: Int?) async throws -> SpiderResult<Route>? {
+        guard route.pageInfo.hasNextPage else { return nil }
+        return try await page(route.request.sized(numberOfItineraries), after: route.pageInfo.endCursor)
+    }
+
+    /// The previous window before `route`, or nil if there is none. Pages backward with `before`, at the page size
+    /// `route` was asked with.
     public func planPrevious(_ route: Route) async throws -> SpiderResult<Route>? {
         guard route.pageInfo.hasPreviousPage else { return nil }
         return try await page(route.request, before: route.pageInfo.startCursor)
+    }
+
+    /// The previous window before `route`, or nil if there is none, holding at most `numberOfItineraries` as in
+    /// `plan` (nil = the environment's limit). The pages before this one keep it.
+    public func planPrevious(_ route: Route, numberOfItineraries: Int?) async throws -> SpiderResult<Route>? {
+        guard route.pageInfo.hasPreviousPage else { return nil }
+        return try await page(route.request.sized(numberOfItineraries), before: route.pageInfo.startCursor)
     }
 
     /// Streams the initial search window over Server-Sent Events as the router sweeps it, emitting itineraries
@@ -359,6 +454,8 @@ public final class SpiderRouting {
     /// To continue, read `done.pageInfo` and call `planStreamNext(..., after: done.pageInfo.endCursor)` (when
     /// `hasNextPage`) or `planStreamPrevious(..., before: done.pageInfo.startCursor)` (when `hasPreviousPage`).
     /// `options.searchWindowMinutes` is ignored — the stream paces itself. For a single batched page, use `plan`.
+    /// A continuation's cursor carries only the time and the window it continues, so pass it the same options,
+    /// `preferences` and `transitOnly` included.
     public func planStream(
         _ options: PlanOptions,
         targetResults: Int,
@@ -503,7 +600,7 @@ public final class SpiderRouting {
 
     // MARK: paging internals
 
-    private func makeRequest(_ options: PlanOptions) -> PlanRequest {
+    private func makeRequest(_ options: PlanOptions, numberOfItineraries: Int? = nil) -> PlanRequest {
         let kind: PlanTimeKind = options.arriveBy != nil ? .arriveBy : .departAt
         let time = options.arriveBy ?? options.departAt ?? Date()
         return PlanRequest(
@@ -517,7 +614,10 @@ public final class SpiderRouting {
             searchWindowMinutes: options.searchWindowMinutes ?? DEFAULT_SEARCH_WINDOW_MINUTES,
             wheelchairAccessible: options.wheelchairAccessible,
             reliability: options.reliability,
-            excludedTransitModes: options.excludedTransitModes
+            excludedTransitModes: options.excludedTransitModes,
+            preferences: options.preferences,
+            transitOnly: options.transitOnly,
+            numberOfItineraries: numberOfItineraries
         )
     }
 
@@ -536,8 +636,10 @@ public final class SpiderRouting {
             destination: locationToInput(request.destination),
             searchWindow: "PT\(request.searchWindowMinutes)M",
             via: try viaInputs(request.via),
-            modes: try modesInput(allowed: request.allowedTransitModes, excluded: request.excludedTransitModes),
-            preferences: preferencesInput(request),
+            modes: try modesInput(request),
+            preferences: try preferencesInput(request),
+            first: before == nil ? request.numberOfItineraries : nil,
+            last: before == nil ? nil : request.numberOfItineraries,
             before: before,
             after: after,
             reliability: reliabilityInput(request.reliability)
@@ -575,8 +677,8 @@ public final class SpiderRouting {
             targetResults: targetResults,
             maxWindow: "PT\(maxWindowMinutes)M",
             via: try viaInputs(request.via),
-            modes: try modesInput(allowed: request.allowedTransitModes, excluded: request.excludedTransitModes),
-            preferences: preferencesInput(request),
+            modes: try modesInput(request),
+            preferences: try preferencesInput(request),
             before: before,
             after: after,
             reliability: reliabilityInput(request.reliability)
@@ -703,12 +805,13 @@ private func viaInputs(_ via: [ViaLocation]) throws -> [PlanViaLocationInput]? {
 private let MODES_TRANSIT = "modes.transit"
 
 // The API refuses both lists in one request; refuse it here, before the request, with the API's own field.
-private func modesInput(allowed: [TransitMode], excluded: [TransitMode]) throws -> PlanModesInput? {
-    let transit = wireTransitModes(allowed)?.map { PlanTransitModePreferenceInput(mode: $0) }
-    let exclude = wireTransitModes(excluded)
+private func modesInput(_ request: PlanRequest) throws -> PlanModesInput? {
+    let transit = wireTransitModes(request.allowedTransitModes)?.map { PlanTransitModePreferenceInput(mode: $0) }
+    let exclude = wireTransitModes(request.excludedTransitModes)
     if transit != nil && exclude != nil { throw invalid(MODES_TRANSIT) }
-    if transit == nil && exclude == nil { return nil }
-    return PlanModesInput(transit: PlanTransitModesInput(transit: transit, exclude: exclude))
+    let transitModes = transit == nil && exclude == nil ? nil : PlanTransitModesInput(transit: transit, exclude: exclude)
+    if transitModes == nil && !request.transitOnly { return nil }
+    return PlanModesInput(transitOnly: request.transitOnly ? true : nil, transit: transitModes)
 }
 
 // A filter's wire modes: `.walk`/`.unknown` and the other street/leg modes drop out, and empty (also once they
@@ -720,16 +823,68 @@ private func wireTransitModes(_ modes: [TransitMode]) -> [SpiderContract.Transit
     return wire.isEmpty ? nil : wire
 }
 
-private func preferencesInput(_ request: PlanRequest) -> PlanPreferencesInput? {
+private func preferencesInput(_ request: PlanRequest) throws -> PlanPreferencesInput? {
+    let preferences = request.preferences ?? RoutePreferences()
+    try preferences.checkRanges()
     // The router indexes legs with leg 0 = the initial access (walk, or nothing), so its wire
     // `maximumTransfers` counts boardings = transfers + 1 (wire 0 = walk-only, not exposed here).
     // `maxTransfers` is a transfer count, so map it to boardings: 0 transfers = 1 boarding (direct).
-    let transit = request.maxTransfers.map { TransitPreferencesInput(transfer: TransferPreferencesInput(maximumTransfers: $0 + 1)) }
+    let maximumTransfers = request.maxTransfers.map { $0 + 1 }
+    let transferSlack = preferences.transferSlackSeconds.map(isoSeconds)
+    let transfer = preferences.transferCost == nil && transferSlack == nil && maximumTransfers == nil
+        ? nil
+        : TransferPreferencesInput(cost: preferences.transferCost, slack: transferSlack, maximumTransfers: maximumTransfers)
+    let boardSlack = preferences.boardSlackSeconds.map(isoSeconds)
+    let board = preferences.waitReluctance == nil && boardSlack == nil
+        ? nil
+        : BoardPreferencesInput(waitReluctance: preferences.waitReluctance, slack: boardSlack)
+    let alight = preferences.alightSlackSeconds.map { AlightPreferencesInput(slack: isoSeconds($0)) }
+    let filters = preferences.filterInputs()
+    let transit = transfer == nil && board == nil && alight == nil && filters == nil
+        ? nil
+        : TransitPreferencesInput(transfer: transfer, board: board, alight: alight, filters: filters)
+    let street = preferences.walkSpeed == nil && preferences.walkReluctance == nil && preferences.boardCost == nil
+        ? nil
+        : PlanStreetPreferencesInput(walk: WalkPreferencesInput(
+            speed: preferences.walkSpeed, reluctance: preferences.walkReluctance, boardCost: preferences.boardCost
+        ))
     let accessibility = request.wheelchairAccessible
         ? AccessibilityPreferencesInput(wheelchair: WheelchairPreferencesInput(enabled: true))
         : nil
-    if transit == nil && accessibility == nil { return nil }
-    return PlanPreferencesInput(transit: transit, accessibility: accessibility)
+    if street == nil && transit == nil && accessibility == nil { return nil }
+    return PlanPreferencesInput(street: street, transit: transit, accessibility: accessibility)
+}
+
+private func isoSeconds(_ seconds: Int) -> String { "PT\(seconds)S" }
+
+private let WALK_PREFERENCES = "preferences.street.walk"
+private let TRANSIT_PREFERENCES = "preferences.transit"
+private let MIN_MULTIPLIER = 0.1
+private let MAX_MULTIPLIER = 100_000.0
+private let MAX_COST = 1_000_000
+private let MAX_SLACK_SECONDS = 3_600
+
+extension RoutePreferences {
+    fileprivate func checkRanges() throws {
+        func check(_ field: String, _ inRange: Bool) throws { if !inRange { throw outOfRange(field) } }
+        func multiplier(_ value: Double) -> Bool { (MIN_MULTIPLIER...MAX_MULTIPLIER).contains(value) }
+        func slack(_ seconds: Int) -> Bool { (0...MAX_SLACK_SECONDS).contains(seconds) }
+        if let walkSpeed { try check("\(WALK_PREFERENCES).speed", walkSpeed.isFinite && walkSpeed >= MIN_MULTIPLIER) }
+        if let walkReluctance { try check("\(WALK_PREFERENCES).reluctance", multiplier(walkReluctance)) }
+        if let boardCost { try check("\(WALK_PREFERENCES).boardCost", (0...MAX_COST).contains(boardCost)) }
+        if let transferCost { try check("\(TRANSIT_PREFERENCES).transfer.cost", (0...MAX_COST).contains(transferCost)) }
+        if let transferSlackSeconds { try check("\(TRANSIT_PREFERENCES).transfer.slack", slack(transferSlackSeconds)) }
+        if let waitReluctance { try check("\(TRANSIT_PREFERENCES).board.waitReluctance", multiplier(waitReluctance)) }
+        if let boardSlackSeconds { try check("\(TRANSIT_PREFERENCES).board.slack", slack(boardSlackSeconds)) }
+        if let alightSlackSeconds { try check("\(TRANSIT_PREFERENCES).alight.slack", slack(alightSlackSeconds)) }
+    }
+
+    fileprivate func filterInputs() -> [TransitFilterInput]? {
+        var selectors: [TransitFilterSelectInput] = []
+        if !excludedRoutes.isEmpty { selectors.append(TransitFilterSelectInput(routes: excludedRoutes)) }
+        if !excludedAgencies.isEmpty { selectors.append(TransitFilterSelectInput(agencies: excludedAgencies)) }
+        return selectors.isEmpty ? nil : [TransitFilterInput(exclude: selectors)]
+    }
 }
 
 private func reliabilityInput(_ reliability: Reliability?) -> SpiderContract.Reliability? {
