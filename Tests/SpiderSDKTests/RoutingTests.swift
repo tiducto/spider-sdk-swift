@@ -285,7 +285,7 @@ final class RoutingTests: XCTestCase {
         boardCost: 600,
         transferCost: 300,
         transferSlackSeconds: 120,
-        waitReluctance: 0.5,
+        waitReluctance: 1.5,
         boardSlackSeconds: 30,
         alightSlackSeconds: 3_600,
         excludedRoutes: ["1:L4", "1:L9"],
@@ -296,7 +296,7 @@ final class RoutingTests: XCTestCase {
         "street": ["walk": ["speed": 1.2, "reluctance": 4.5, "boardCost": 600]],
         "transit": [
             "transfer": ["cost": 300, "slack": "PT120S", "maximumTransfers": 3],
-            "board": ["waitReluctance": 0.5, "slack": "PT30S"],
+            "board": ["waitReluctance": 1.5, "slack": "PT30S"],
             "alight": ["slack": "PT3600S"],
             "filters": [["exclude": [["routes": ["1:L4", "1:L9"]], ["agencies": ["1:DPMB"]]]]],
         ],
@@ -347,7 +347,7 @@ final class RoutingTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let cases: [(RoutePreferences, [String: Any])] = [
             (RoutePreferences(transferSlackSeconds: 0), ["transit": ["transfer": ["slack": "PT0S"]]]),
-            (RoutePreferences(walkSpeed: 0.1), ["street": ["walk": ["speed": 0.1]]]),
+            (RoutePreferences(walkSpeed: 0.3), ["street": ["walk": ["speed": 0.3]]]),
             (RoutePreferences(boardSlackSeconds: 90), ["transit": ["board": ["slack": "PT90S"]]]),
             (RoutePreferences(alightSlackSeconds: 15), ["transit": ["alight": ["slack": "PT15S"]]]),
             (
@@ -364,15 +364,18 @@ final class RoutingTests: XCTestCase {
     func testPlanRejectsPreferencesOutOfRangeWithTheirPathWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let outOfRange: [(RoutePreferences, String)] = [
-            (RoutePreferences(walkSpeed: 0.09), "preferences.street.walk.speed"),
+            (RoutePreferences(walkSpeed: 0.29), "preferences.street.walk.speed"),
+            (RoutePreferences(walkSpeed: 5.01), "preferences.street.walk.speed"),
             (RoutePreferences(walkSpeed: .infinity), "preferences.street.walk.speed"),
             (RoutePreferences(walkSpeed: .nan), "preferences.street.walk.speed"),
-            (RoutePreferences(walkReluctance: 0.09), "preferences.street.walk.reluctance"),
-            (RoutePreferences(walkReluctance: 100_001), "preferences.street.walk.reluctance"),
+            (RoutePreferences(walkReluctance: 0.99), "preferences.street.walk.reluctance"),
+            (RoutePreferences(walkReluctance: 100.01), "preferences.street.walk.reluctance"),
             (RoutePreferences(boardCost: -1), "preferences.street.walk.boardCost"),
-            (RoutePreferences(transferCost: 1_000_001), "preferences.transit.transfer.cost"),
+            (RoutePreferences(boardCost: 86_401), "preferences.street.walk.boardCost"),
+            (RoutePreferences(transferCost: 86_401), "preferences.transit.transfer.cost"),
             (RoutePreferences(transferSlackSeconds: -1), "preferences.transit.transfer.slack"),
-            (RoutePreferences(waitReluctance: 0), "preferences.transit.board.waitReluctance"),
+            (RoutePreferences(waitReluctance: 0.99), "preferences.transit.board.waitReluctance"),
+            (RoutePreferences(waitReluctance: 100.01), "preferences.transit.board.waitReluctance"),
             (RoutePreferences(boardSlackSeconds: 3_660), "preferences.transit.board.slack"),
             (RoutePreferences(alightSlackSeconds: 3_601), "preferences.transit.alight.slack"),
         ]
@@ -390,8 +393,8 @@ final class RoutingTests: XCTestCase {
     func testPlanAcceptsPreferencesAtTheirBounds() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         for preferences in [
-            RoutePreferences(walkSpeed: 0.1, walkReluctance: 0.1, boardCost: 0, transferCost: 0, transferSlackSeconds: 0, waitReluctance: 0.1, boardSlackSeconds: 0, alightSlackSeconds: 0),
-            RoutePreferences(walkSpeed: 1_000, walkReluctance: 100_000, boardCost: 1_000_000, transferCost: 1_000_000, transferSlackSeconds: 3_600, waitReluctance: 100_000, boardSlackSeconds: 3_600, alightSlackSeconds: 3_600),
+            RoutePreferences(walkSpeed: 0.3, walkReluctance: 1, boardCost: 0, transferCost: 0, transferSlackSeconds: 0, waitReluctance: 1, boardSlackSeconds: 0, alightSlackSeconds: 0),
+            RoutePreferences(walkSpeed: 5, walkReluctance: 100, boardCost: 86_400, transferCost: 86_400, transferSlackSeconds: 3_600, waitReluctance: 100, boardSlackSeconds: 3_600, alightSlackSeconds: 3_600),
         ] {
             let result = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), preferences: preferences))
             XCTAssertTrue(result.isSuccess, "\(preferences)")
@@ -444,7 +447,7 @@ final class RoutingTests: XCTestCase {
     // beside exclude when modes are excluded; non-transit modes drop out.
     func testPlanSendsModeReluctanceAsCostsAloneAndBesideExclude() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
-        let reluctance: [TransitMode: Double] = [.trolleybus: 0.5, .tram: 2, .bus: 4.5, .walk: 3, .unknown: 3]
+        let reluctance: [TransitMode: Double] = [.trolleybus: 1.5, .tram: 2, .bus: 4.5, .walk: 3, .unknown: 3]
         _ = try await client.routing.plan(PlanOptions(
             origin: .stop("S1"), destination: .stop("S2"), preferences: RoutePreferences(modeReluctance: reluctance)
         ))
@@ -457,7 +460,7 @@ final class RoutingTests: XCTestCase {
             preferences: RoutePreferences(modeReluctance: [.bus: 2])
         ))
         let costs: [[String: Any]] = [
-            ["mode": "BUS", "reluctance": 4.5], ["mode": "TRAM", "reluctance": 2.0], ["mode": "TROLLEYBUS", "reluctance": 0.5],
+            ["mode": "BUS", "reluctance": 4.5], ["mode": "TRAM", "reluctance": 2.0], ["mode": "TROLLEYBUS", "reluctance": 1.5],
         ]
         XCTAssertEqual(mock.requests[0].bodyJSON["modes"] as? NSDictionary, ["transit": ["costs": costs]] as NSDictionary)
         XCTAssertEqual(
@@ -477,11 +480,11 @@ final class RoutingTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         _ = try await client.routing.plan(PlanOptions(
             origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: [.tram, .bus],
-            preferences: RoutePreferences(modeReluctance: [.bus: 3, .rail: 0.2])
+            preferences: RoutePreferences(modeReluctance: [.bus: 3, .rail: 1.2])
         ))
         _ = try await client.routing.plan(PlanOptions(
             origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: [.tram],
-            preferences: RoutePreferences(modeReluctance: [.rail: 0.2])
+            preferences: RoutePreferences(modeReluctance: [.rail: 1.2])
         ))
         XCTAssertEqual(
             mock.requests[0].bodyJSON["modes"] as? NSDictionary,
@@ -518,8 +521,8 @@ final class RoutingTests: XCTestCase {
     func testPlanRejectsModeReluctanceOutOfRangeWithoutRequest() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let cases: [([TransitMode], Double, String)] = [
-            ([], 0.09, "modes.transit.costs.reluctance"),
-            ([], 100_001, "modes.transit.costs.reluctance"),
+            ([], 0.99, "modes.transit.costs.reluctance"),
+            ([], 100.01, "modes.transit.costs.reluctance"),
             ([], .infinity, "modes.transit.costs.reluctance"),
             ([], .nan, "modes.transit.costs.reluctance"),
             ([.bus], 0, "modes.transit.transit.cost.reluctance"),
@@ -537,7 +540,7 @@ final class RoutingTests: XCTestCase {
             XCTAssertNil(error.httpStatus)
         }
         XCTAssertTrue(mock.requests.isEmpty)
-        for value in [0.1, 100_000] {
+        for value in [1.0, 100] {
             let result = try await client.routing.plan(PlanOptions(
                 origin: .stop("S1"), destination: .stop("S2"), preferences: RoutePreferences(modeReluctance: [.bus: value])
             ))
@@ -550,7 +553,7 @@ final class RoutingTests: XCTestCase {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let result = try await client.routing.plan(PlanOptions(
             origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: [.rail],
-            preferences: RoutePreferences(modeReluctance: [.tram: 0.8])
+            preferences: RoutePreferences(modeReluctance: [.tram: 1.8])
         ))
         guard case .success(let route) = result else { return XCTFail("expected success") }
         _ = try await client.routing.planNext(route)
@@ -561,7 +564,7 @@ final class RoutingTests: XCTestCase {
         for request in mock.requests {
             XCTAssertEqual(
                 request.bodyJSON["modes"] as? NSDictionary,
-                ["transit": ["exclude": ["RAIL"], "costs": [["mode": "TRAM", "reluctance": 0.8]]]] as NSDictionary
+                ["transit": ["exclude": ["RAIL"], "costs": [["mode": "TRAM", "reluctance": 1.8]]]] as NSDictionary
             )
         }
     }

@@ -327,11 +327,11 @@ public struct PlanOptions: Sendable {
 /// path (such as `preferences.street.walk.speed`) without a request; the API never clamps one. The API rounds the
 /// multipliers and the walking speed to its own steps.
 ///
-/// `walkSpeed` is the walking speed on flat ground in metres per second, at least 0.1. `walkReluctance` is how much
-/// worse walking is than riding for the same time, a multiplier from 0.1 to 100000: above the default it walks less.
+/// `walkSpeed` is the walking speed on flat ground in metres per second, from 0.3 to 5. `walkReluctance` is how much
+/// worse walking is than riding for the same time, a multiplier from 1 to 100: above the default it walks less.
 /// `boardCost` is a generalized cost added for each boarding and `transferCost` one added for each transfer, each from
-/// 0 to 1000000: higher favours fewer rides. `waitReluctance` is how much worse waiting at a stop is than riding for
-/// the same time, from 0.1 to 100000: above the default it rather walks on than waits.
+/// 0 to 86400: higher favours fewer rides. `waitReluctance` is how much worse waiting at a stop is than riding for
+/// the same time, from 1 to 100: above the default it rather walks on than waits.
 ///
 /// `transferSlackSeconds` is the least time between alighting one vehicle and boarding the next, on top of the walk
 /// between the stops; `boardSlackSeconds` the least time at the stop before boarding; `alightSlackSeconds` the least
@@ -341,8 +341,8 @@ public struct PlanOptions: Sendable {
 /// (`<feedId>:<id>`; a route id as `Leg.routeGtfsId` and `Departure.routeGtfsId` give it). An id the environment's
 /// feed doesn't know excludes nothing, and empty excludes nothing.
 ///
-/// `modeReluctance` is a multiplier on the time spent riding each listed transit mode, from 0.1 to 100000: above 1
-/// avoids the mode, below 1 favours it, and a mode not listed keeps 1. It restricts no mode, and a mode
+/// `modeReluctance` is a multiplier on the time spent riding each listed transit mode, from 1 to 100: 1 rides the
+/// mode as any other, above 1 avoids it, and a mode not listed keeps 1. It restricts no mode, and a mode
 /// `PlanOptions.excludedTransitModes` names stays excluded. Without `PlanOptions.allowedTransitModes` it goes out as
 /// `modes.transit.costs`, in `TransitMode` declaration order; with them, each allowed mode carries its own reluctance
 /// and a reluctance for a mode not allowed is dropped. `.walk`, `.unknown` and the other non-transit modes are
@@ -955,9 +955,11 @@ private func isoSeconds(_ seconds: Int) -> String { "PT\(seconds)S" }
 
 private let WALK_PREFERENCES = "preferences.street.walk"
 private let TRANSIT_PREFERENCES = "preferences.transit"
-private let MIN_MULTIPLIER = 0.1
-private let MAX_MULTIPLIER = 100_000.0
-private let MAX_COST = 1_000_000
+private let MIN_MULTIPLIER = 1.0
+private let MAX_MULTIPLIER = 100.0
+private let MIN_WALK_SPEED = 0.3
+private let MAX_WALK_SPEED = 5.0
+private let MAX_COST = 86_400
 private let MAX_SLACK_SECONDS = 3_600
 
 extension RoutePreferences {
@@ -965,7 +967,7 @@ extension RoutePreferences {
         func check(_ field: String, _ inRange: Bool) throws { if !inRange { throw outOfRange(field) } }
         func multiplier(_ value: Double) -> Bool { (MIN_MULTIPLIER...MAX_MULTIPLIER).contains(value) }
         func slack(_ seconds: Int) -> Bool { (0...MAX_SLACK_SECONDS).contains(seconds) }
-        if let walkSpeed { try check("\(WALK_PREFERENCES).speed", walkSpeed.isFinite && walkSpeed >= MIN_MULTIPLIER) }
+        if let walkSpeed { try check("\(WALK_PREFERENCES).speed", (MIN_WALK_SPEED...MAX_WALK_SPEED).contains(walkSpeed)) }
         if let walkReluctance { try check("\(WALK_PREFERENCES).reluctance", multiplier(walkReluctance)) }
         if let boardCost { try check("\(WALK_PREFERENCES).boardCost", (0...MAX_COST).contains(boardCost)) }
         if let transferCost { try check("\(TRANSIT_PREFERENCES).transfer.cost", (0...MAX_COST).contains(transferCost)) }
