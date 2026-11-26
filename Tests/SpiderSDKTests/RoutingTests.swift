@@ -279,6 +279,194 @@ final class RoutingTests: XCTestCase {
         XCTAssertTrue(mock.requests.isEmpty)
     }
 
+    private let fullPreferences = RoutePreferences(
+        walkSpeed: 1.2,
+        walkReluctance: 4.5,
+        boardCost: 600,
+        transferCost: 300,
+        transferSlackSeconds: 120,
+        waitReluctance: 0.5,
+        boardSlackSeconds: 30,
+        alightSlackSeconds: 3_600,
+        excludedRoutes: ["1:L4", "1:L9"],
+        excludedAgencies: ["1:DPMB"]
+    )
+
+    private let fullPreferencesWire: [String: Any] = [
+        "street": ["walk": ["speed": 1.2, "reluctance": 4.5, "boardCost": 600]],
+        "transit": [
+            "transfer": ["cost": 300, "slack": "PT120S", "maximumTransfers": 3],
+            "board": ["waitReluctance": 0.5, "slack": "PT30S"],
+            "alight": ["slack": "PT3600S"],
+            "filters": [["exclude": [["routes": ["1:L4", "1:L9"]], ["agencies": ["1:DPMB"]]]]],
+        ],
+        "accessibility": ["wheelchair": ["enabled": true]],
+    ]
+
+    func testPlanWithoutOrWithEmptyPreferencesSendsTodaysBody() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        func options(_ preferences: RoutePreferences?, transitOnly: Bool = false) -> PlanOptions {
+            PlanOptions(
+                origin: .stop("S1"), destination: .stop("S2"), departAt: Date(timeIntervalSince1970: 1_791_612_000),
+                maxTransfers: 1, wheelchairAccessible: true, preferences: preferences, transitOnly: transitOnly
+            )
+        }
+        for preferences in [nil, RoutePreferences(), RoutePreferences(excludedRoutes: [], excludedAgencies: [])] {
+            _ = try await client.routing.plan(options(preferences))
+        }
+        _ = try await client.routing.plan(options(nil, transitOnly: false))
+        let expected: [String: Any] = [
+            "dateTime": ["earliestDeparture": "2026-10-10T06:00:00Z"],
+            "origin": ["location": ["stopLocation": ["stopLocationId": "S1"]]],
+            "destination": ["location": ["stopLocation": ["stopLocationId": "S2"]]],
+            "preferences": [
+                "transit": ["transfer": ["maximumTransfers": 2]],
+                "accessibility": ["wheelchair": ["enabled": true]],
+            ],
+            "searchWindow": "PT60M",
+        ]
+        XCTAssertEqual(mock.requests.count, 4)
+        for request in mock.requests {
+            XCTAssertEqual(request.bodyJSON as NSDictionary, expected as NSDictionary)
+        }
+        _ = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), preferences: RoutePreferences()))
+        XCTAssertNil(mock.requests[4].bodyJSON["preferences"])
+        XCTAssertNil(mock.requests[4].bodyJSON["modes"])
+    }
+
+    func testPlanSendsEveryPreferenceAtItsContractPathBesideTransfersAndWheelchair() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), maxTransfers: 2, wheelchairAccessible: true,
+            preferences: fullPreferences
+        ))
+        XCTAssertEqual(mock.requests[0].bodyJSON["preferences"] as? NSDictionary, fullPreferencesWire as NSDictionary)
+    }
+
+    func testPlanSendsASinglePreferenceOnItsOwnBranch() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let cases: [(RoutePreferences, [String: Any])] = [
+            (RoutePreferences(transferSlackSeconds: 0), ["transit": ["transfer": ["slack": "PT0S"]]]),
+            (RoutePreferences(walkSpeed: 0.1), ["street": ["walk": ["speed": 0.1]]]),
+            (RoutePreferences(boardSlackSeconds: 90), ["transit": ["board": ["slack": "PT90S"]]]),
+            (RoutePreferences(alightSlackSeconds: 15), ["transit": ["alight": ["slack": "PT15S"]]]),
+            (
+                RoutePreferences(excludedRoutes: [], excludedAgencies: ["1:A"]),
+                ["transit": ["filters": [["exclude": [["agencies": ["1:A"]]]]]]]
+            ),
+        ]
+        for (index, (preferences, expected)) in cases.enumerated() {
+            _ = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), preferences: preferences))
+            XCTAssertEqual(mock.requests[index].bodyJSON["preferences"] as? NSDictionary, expected as NSDictionary, "\(preferences)")
+        }
+    }
+
+    func testPlanRejectsPreferencesOutOfRangeWithTheirPathWithoutRequest() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let outOfRange: [(RoutePreferences, String)] = [
+            (RoutePreferences(walkSpeed: 0.09), "preferences.street.walk.speed"),
+            (RoutePreferences(walkSpeed: .infinity), "preferences.street.walk.speed"),
+            (RoutePreferences(walkSpeed: .nan), "preferences.street.walk.speed"),
+            (RoutePreferences(walkReluctance: 0.09), "preferences.street.walk.reluctance"),
+            (RoutePreferences(walkReluctance: 100_001), "preferences.street.walk.reluctance"),
+            (RoutePreferences(boardCost: -1), "preferences.street.walk.boardCost"),
+            (RoutePreferences(transferCost: 1_000_001), "preferences.transit.transfer.cost"),
+            (RoutePreferences(transferSlackSeconds: -1), "preferences.transit.transfer.slack"),
+            (RoutePreferences(waitReluctance: 0), "preferences.transit.board.waitReluctance"),
+            (RoutePreferences(boardSlackSeconds: 3_660), "preferences.transit.board.slack"),
+            (RoutePreferences(alightSlackSeconds: 3_601), "preferences.transit.alight.slack"),
+        ]
+        for (preferences, field) in outOfRange {
+            let result = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), preferences: preferences))
+            guard case .failure(let error) = result else { return XCTFail("expected failure for \(preferences)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, field)
+            XCTAssertEqual(error.message, "\(field) is out of range")
+            XCTAssertNil(error.httpStatus)
+        }
+        XCTAssertTrue(mock.requests.isEmpty)
+    }
+
+    func testPlanAcceptsPreferencesAtTheirBounds() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        for preferences in [
+            RoutePreferences(walkSpeed: 0.1, walkReluctance: 0.1, boardCost: 0, transferCost: 0, transferSlackSeconds: 0, waitReluctance: 0.1, boardSlackSeconds: 0, alightSlackSeconds: 0),
+            RoutePreferences(walkSpeed: 1_000, walkReluctance: 100_000, boardCost: 1_000_000, transferCost: 1_000_000, transferSlackSeconds: 3_600, waitReluctance: 100_000, boardSlackSeconds: 3_600, alightSlackSeconds: 3_600),
+        ] {
+            let result = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), preferences: preferences))
+            XCTAssertTrue(result.isSuccess, "\(preferences)")
+        }
+        XCTAssertEqual(mock.requests.count, 2)
+    }
+
+    func testPlanSendsTransitOnlyAloneAndBesideAModeFilter() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        _ = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2"), transitOnly: true))
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: [.tram], transitOnly: true
+        ))
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), allowedTransitModes: [.bus], transitOnly: true
+        ))
+        _ = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), excludedTransitModes: [.tram], transitOnly: false
+        ))
+        let modes = mock.requests.map { $0.bodyJSON["modes"] as? NSDictionary }
+        XCTAssertEqual(modes[0], ["transitOnly": true] as NSDictionary)
+        XCTAssertEqual(modes[1], ["transitOnly": true, "transit": ["exclude": ["TRAM"]]] as NSDictionary)
+        XCTAssertEqual(modes[2], ["transitOnly": true, "transit": ["transit": [["mode": "BUS"]]]] as NSDictionary)
+        XCTAssertEqual(modes[3], ["transit": ["exclude": ["TRAM"]]] as NSDictionary)
+    }
+
+    func testPlanKeepsPreferencesAndTransitOnlyWhenPaging() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        let preferences = RoutePreferences(walkSpeed: 1.0, transferSlackSeconds: 180, excludedRoutes: ["1:L4"])
+        let result = try await client.routing.plan(PlanOptions(
+            origin: .stop("S1"), destination: .stop("S2"), preferences: preferences, transitOnly: true
+        ))
+        guard case .success(let route) = result else { return XCTFail("expected success") }
+        _ = try await client.routing.planNext(route)
+        _ = try await client.routing.planPrevious(route)
+        _ = try await client.routing.planNext(route, numberOfItineraries: 2)
+        _ = try await client.routing.planPrevious(route, numberOfItineraries: 2)
+        let expected: [String: Any] = [
+            "street": ["walk": ["speed": 1.0]],
+            "transit": ["transfer": ["slack": "PT180S"], "filters": [["exclude": [["routes": ["1:L4"]]]]]],
+        ]
+        XCTAssertEqual(mock.requests.count, 5)
+        for request in mock.requests {
+            XCTAssertEqual(request.bodyJSON["preferences"] as? NSDictionary, expected as NSDictionary)
+            XCTAssertEqual(request.bodyJSON["modes"] as? NSDictionary, ["transitOnly": true] as NSDictionary)
+        }
+    }
+
+    func testPlanNumberOfItinerariesIsFirstOrLastByDirectionAndKeptWhenPaging() async throws {
+        let (client, mock) = makeClient { _ in json(self.planBody) }
+        guard case .success(let sized) = try await client.routing.plan(
+            PlanOptions(origin: .stop("S1"), destination: .stop("S2")), numberOfItineraries: 3
+        ) else { return XCTFail("expected success") }
+        _ = try await client.routing.planNext(sized)
+        _ = try await client.routing.planPrevious(sized)
+        guard case .success(let next)? = try await client.routing.planNext(sized, numberOfItineraries: 1) else {
+            return XCTFail("expected a next page")
+        }
+        _ = try await client.routing.planPrevious(sized, numberOfItineraries: nil)
+        _ = try await client.routing.planNext(next)
+        _ = try await client.routing.planPrevious(next)
+        _ = try await client.routing.plan(PlanOptions(origin: .stop("S1"), destination: .stop("S2")))
+
+        let counts = mock.requests.map { [$0.bodyJSON["first"] as? Int, $0.bodyJSON["last"] as? Int] }
+        XCTAssertEqual(counts, [[3, nil], [3, nil], [nil, 3], [1, nil], [nil, nil], [1, nil], [nil, 1], [nil, nil]])
+        XCTAssertEqual(
+            mock.requests.map { $0.bodyJSON["after"] as? String },
+            [nil, "c1", nil, "c1", nil, "c1", nil, nil]
+        )
+        XCTAssertEqual(
+            mock.requests.map { $0.bodyJSON["before"] as? String },
+            [nil, nil, "c0", nil, "c0", nil, "c0", nil]
+        )
+    }
+
     func testPlanSendsViaAtItsFixedLimits() async throws {
         let (client, mock) = makeClient { _ in json(self.planBody) }
         let ten = (1...10).map { "1:V\($0)" }

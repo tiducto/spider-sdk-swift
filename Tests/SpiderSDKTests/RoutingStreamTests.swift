@@ -178,6 +178,38 @@ final class RoutingStreamTests: XCTestCase {
         XCTAssertNil(try streamBodyJSON(walkOnly)["modes"])
     }
 
+    func testPlanStreamSendsPreferencesAndTransitOnlyOnEveryCursor() throws {
+        let (client, _) = makeClient { _ in json("{}") }
+        let options = PlanOptions(
+            origin: .stop("1:A"), destination: .stop("1:B"), maxTransfers: 0, excludedTransitModes: [.tram],
+            preferences: RoutePreferences(walkReluctance: 2, boardSlackSeconds: 60, excludedRoutes: ["1:L4"]),
+            transitOnly: true
+        )
+        let preferences: [String: Any] = [
+            "street": ["walk": ["reluctance": 2.0]],
+            "transit": [
+                "transfer": ["maximumTransfers": 1],
+                "board": ["slack": "PT60S"],
+                "filters": [["exclude": [["routes": ["1:L4"]]]]],
+            ],
+        ]
+        for (after, before) in [(nil, nil), ("c-next", nil), (nil, "c-prev")] as [(String?, String?)] {
+            let body = try streamBodyJSON(client.routing.streamBody(
+                options, targetResults: 5, maxWindowMinutes: 120, after: after, before: before
+            ))
+            XCTAssertEqual(body["preferences"] as? NSDictionary, preferences as NSDictionary)
+            XCTAssertEqual(body["modes"] as? NSDictionary, ["transitOnly": true, "transit": ["exclude": ["TRAM"]]] as NSDictionary)
+            XCTAssertNil(body["first"])
+            XCTAssertNil(body["last"])
+        }
+        let plain = try streamBodyJSON(client.routing.streamBody(
+            PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), preferences: RoutePreferences(), transitOnly: false),
+            targetResults: 5, maxWindowMinutes: 120, after: nil, before: nil
+        ))
+        XCTAssertNil(plain["preferences"])
+        XCTAssertNil(plain["modes"])
+    }
+
     // planStreamNext routes its raw cursor into `after` (and never `before`): the continuation request carries
     // exactly the forward cursor.
     func testPlanStreamNextSendsAfterCursor() throws {
@@ -283,6 +315,45 @@ final class RoutingStreamTests: XCTestCase {
             let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(StubStreamProtocol.requestBody)) as? [String: Any])
             XCTAssertEqual(body["modes"] as? NSDictionary, ["transit": ["exclude": ["RAIL"]]] as NSDictionary)
         }
+    }
+
+    func testPlanStreamPostsPreferencesAndTransitOnlyOnEveryCall() async throws {
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(
+            origin: .stop("1:A"), destination: .stop("1:B"),
+            preferences: RoutePreferences(transferCost: 300, alightSlackSeconds: 30), transitOnly: true
+        )
+        let streams: [() -> AsyncStream<PlanStreamEvent>] = [
+            { client.routing.planStream(options, targetResults: 3, maxWindowMinutes: 120) },
+            { client.routing.planStreamNext(options, targetResults: 3, maxWindowMinutes: 120, after: "c-next") },
+            { client.routing.planStreamPrevious(options, targetResults: 3, maxWindowMinutes: 120, before: "c-prev") },
+        ]
+        let preferences: [String: Any] = ["transit": ["transfer": ["cost": 300], "alight": ["slack": "PT30S"]]]
+        for stream in streams {
+            StubStreamProtocol.respond(status: 200, body: declinedStream)
+            _ = await collect(stream())
+            let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(StubStreamProtocol.requestBody)) as? [String: Any])
+            XCTAssertEqual(body["preferences"] as? NSDictionary, preferences as NSDictionary)
+            XCTAssertEqual(body["modes"] as? NSDictionary, ["transitOnly": true] as NSDictionary)
+        }
+    }
+
+    func testPlanStreamRejectsPreferenceOutOfRangeWithoutRequest() async throws {
+        StubStreamProtocol.respond(status: 200, body: "")
+        let client = SpiderClient(baseURL: "https://\(StubStreamProtocol.host)", apiKey: "k")
+        let options = PlanOptions(origin: .stop("1:A"), destination: .stop("1:B"), preferences: RoutePreferences(boardSlackSeconds: 7_200))
+        for stream in [
+            client.routing.planStream(options, targetResults: 5, maxWindowMinutes: 120),
+            client.routing.planStreamNext(options, targetResults: 5, maxWindowMinutes: 120, after: "c"),
+            client.routing.planStreamPrevious(options, targetResults: 5, maxWindowMinutes: 120, before: "c"),
+        ] {
+            let events = await collect(stream)
+            guard events.count == 1, case .failure(let error) = events[0] else { return XCTFail("expected one failure, got \(events)") }
+            XCTAssertEqual(error.code, .badRequest)
+            XCTAssertEqual(error.field, "preferences.transit.board.slack")
+            XCTAssertEqual(error.message, "preferences.transit.board.slack is out of range")
+        }
+        XCTAssertNil(StubStreamProtocol.recordedRequest)
     }
 
     func testPlanStreamIgnoresUnknownEvents() async throws {

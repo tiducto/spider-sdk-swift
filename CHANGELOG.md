@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+Targets Spider API contract 1.11.
+
+### Added
+
+- **`RoutePreferences`** and **`PlanOptions.preferences`**: the contract's routing preferences the SDK didn't
+  expose, sent by `plan`, `planStream`, `planStreamNext` and `planStreamPrevious`; `planNext` / `planPrevious` resend
+  them. `walkSpeed`, `walkReluctance` and `boardCost` go under `preferences.street.walk`, `transferCost` and
+  `transferSlackSeconds` under `preferences.transit.transfer` (beside `maximumTransfers` from `maxTransfers`),
+  `waitReluctance` and `boardSlackSeconds` under `preferences.transit.board`, `alightSlackSeconds` under
+  `preferences.transit.alight`, and `excludedRoutes` / `excludedAgencies` (feed-prefixed ids) as one
+  `preferences.transit.filters` exclusion. Slacks are whole seconds, sent as ISO-8601 (`PT90S`).
+- Each member left nil keeps the environment's default, and empty exclusions exclude nothing, so
+  `RoutePreferences()` sends the same body as no preferences. A value outside the contract's fixed range (a walking
+  speed under 0.1 or not finite, a multiplier outside 0.1 to 100000, a cost outside 0 to 1000000, a slack outside 0
+  to 3600 seconds) fails as `.badRequest` for its contract path, such as `preferences.transit.board.slack`, without a
+  request.
+- **`PlanOptions.transitOnly`** (default false): leaves out every itinerary without a transit leg, such as walking the
+  whole way, on every plan call, alongside `allowedTransitModes` or `excludedTransitModes`. Sent as
+  `modes.transitOnly` only when true. The contract's `directOnly` stays unexposed.
+- **`plan(_:numberOfItineraries:)`**: the most itineraries the page holds, from 1 up to the environment's itinerary
+  limit, rejected and never clamped by the API; nil means the limit. `planNext(_:)` / `planPrevious(_:)` keep the
+  size the route was asked with, and `planNext(_:numberOfItineraries:)` / `planPrevious(_:numberOfItineraries:)`
+  change it for that page and the pages after it. Sent as `first` on the first page and after a cursor, as `last`
+  before one. `planStream` sizes itself by `targetResults` and doesn't take it.
+- Every new parameter has a default, so existing callers compile unchanged.
+
 ## 1.11.0
 
 Targets Spider API contract 1.11.
